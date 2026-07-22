@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: stockyouneed-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: stockyouneed
+    ports:
+      - "5432:5432"
+    volumes:
+      - syn_pg:/var/lib/postgresql/data
+
+volumes:
+  syn_pg:

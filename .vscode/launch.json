@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Worker",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-worker",
+      "program": "${workspaceFolder}/backend/src/StockYouNeed.Worker/bin/Debug/net8.0/StockYouNeed.Worker.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/backend/src/StockYouNeed.Worker",
+      "stopAtEntry": false,
+      "env": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+  ]
+}

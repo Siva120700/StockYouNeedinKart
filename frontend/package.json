@@ -1,0 +1,36 @@
+{
+  "name": "stockyouneed-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/run-api-dev.ps1",
+    "dev:web": "vite",
+    "dev:all": "concurrently -n api,worker,web -c blue,magenta,green \"npm run dev:api\" \"npm run dev:worker\" \"npm run dev:web\"",
+    "dev:worker": "powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/run-worker-dev.ps1",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^6.5.0",
+    "@mui/material": "^6.5.0",
+    "@mui/system": "^6.5.0",
+    "@phosphor-icons/react": "^2.1.10",
+    "dayjs": "^1.11.21",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.18.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/react-router-dom": "^5.3.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.2.1",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.0"
+  }
+}
