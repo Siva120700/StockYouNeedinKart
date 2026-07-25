@@ -42,13 +42,20 @@ public sealed class TokenSyncService
 
         var scrips = await _angel.DownloadScripMasterAsync(ct);
         var nseEquity = new Dictionary<string, AngelScrip>(StringComparer.OrdinalIgnoreCase);
+        var nseIndex = new List<AngelScrip>();
         foreach (var s in scrips.Where(s => s.ExchSeg.Equals("NSE", StringComparison.OrdinalIgnoreCase)))
         {
-            if (!s.Symbol.EndsWith("-EQ", StringComparison.OrdinalIgnoreCase))
-                continue;
-            var key = s.Name.Trim().ToUpperInvariant();
-            if (!nseEquity.ContainsKey(key))
-                nseEquity[key] = s;
+            if (s.Symbol.EndsWith("-EQ", StringComparison.OrdinalIgnoreCase))
+            {
+                var key = s.Name.Trim().ToUpperInvariant();
+                if (!nseEquity.ContainsKey(key))
+                    nseEquity[key] = s;
+            }
+            else if (s.InstrumentType.Equals("AMXIDX", StringComparison.OrdinalIgnoreCase)
+                     || s.Name.Contains("Nifty", StringComparison.OrdinalIgnoreCase))
+            {
+                nseIndex.Add(s);
+            }
         }
 
         var matched = 0;
@@ -80,7 +87,51 @@ public sealed class TokenSyncService
             matched++;
         }
 
-        _logger.LogInformation("Token sync matched {Matched}/{Total} universe equities.", matched, equities.Count);
-        return matched;
+        var sectors = await _instruments.GetSectorIndexesAsync(ct);
+        var sectorMatched = 0;
+        foreach (var sector in sectors)
+        {
+            if (!UniverseSeedService.SectorAngelNameHints.TryGetValue(sector.Symbol, out var hint))
+                hint = sector.Name;
+
+            // Exact name match first, then shortest contains (avoids Nifty Bank vs Nifty Private Bank)
+            var scrip = nseIndex.FirstOrDefault(s =>
+                s.Name.Equals(hint, StringComparison.OrdinalIgnoreCase)
+                || s.Name.Equals(sector.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (scrip is null)
+            {
+                var candidates = nseIndex
+                    .Where(s => s.Name.Contains(hint, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(s => s.Name.Length)
+                    .ToList();
+                if (candidates.Count > 0)
+                    scrip = candidates[0];
+            }
+
+            if (scrip is null)
+            {
+                _logger.LogWarning("No Angel NSE index token for sector {Symbol} (hint: {Hint})", sector.Symbol, hint);
+                continue;
+            }
+
+            await _instruments.UpsertAngelTokenAsync(new AngelTokenRow
+            {
+                InstrumentId = sector.Id,
+                Exchange = "NSE",
+                SymbolToken = scrip.Token,
+                TradingSymbol = scrip.Symbol,
+                Name = scrip.Name,
+                AppSymbol = sector.Symbol
+            }, ct);
+            sectorMatched++;
+            _logger.LogInformation("Sector token {Symbol} → Angel {Name} ({Token})",
+                sector.Symbol, scrip.Name, scrip.Token);
+        }
+
+        _logger.LogInformation(
+            "Token sync matched equities {Matched}/{Total}, sectors {SectorMatched}/{SectorTotal}.",
+            matched, equities.Count, sectorMatched, sectors.Count);
+        return matched + sectorMatched;
     }
 }

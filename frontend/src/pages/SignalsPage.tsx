@@ -34,7 +34,7 @@ export default function SignalsPage() {
     setRunning(true);
     setError(null);
     try {
-      await ActionFactory.runAnalysis(sectorCheck);
+      await ActionFactory.runAnalysis();
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -52,9 +52,21 @@ export default function SignalsPage() {
     }
   }
 
+  // Sector toggle filters already-loaded rows — no backend call.
+  const visibleRows = useMemo(
+    () => (sectorCheck ? rows.filter((r) => r.sectorConfirmed) : rows),
+    [rows, sectorCheck],
+  );
+
   useEffect(() => {
     setTitle("Signals");
     setBreadcrumbs([{ label: "Home" }, { label: "Signals" }]);
+    void refresh();
+    return () => setPageActions(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     setPageActions(
       <MuiStack direction="row" spacing={1} alignItems="center">
         <FormControlLabel
@@ -79,47 +91,37 @@ export default function SignalsPage() {
         </Button>
       </MuiStack>,
     );
-    void refresh();
-    return () => setPageActions(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, sectorCheck]);
+  }, [running, sectorCheck, visibleRows.length]);
 
-  const columns = useMemo(
-    () => {
-      const formatTarget = (row: Signal, target: number | null | undefined) => {
-        if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice)
-          return "";
-        const t = Number(target);
-        const entry = Number(row.entryPrice);
-        if (entry === 0) return t.toFixed(2);
-        const pct =
-          row.side === "sell"
-            ? ((entry - t) / entry) * 100
-            : ((t - entry) / entry) * 100;
-        return `${t.toLocaleString("en-IN", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
-      };
+  const columns = useMemo(() => {
+    const formatTarget = (row: Signal, target: number | null | undefined) => {
+      if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice) return "";
+      const t = Number(target);
+      const entry = Number(row.entryPrice);
+      if (entry === 0) return t.toFixed(2);
+      const pct =
+        row.side === "sell" ? ((entry - t) / entry) * 100 : ((t - entry) / entry) * 100;
+      return `${t.toLocaleString("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+    };
 
-      const formatSl = (row: Signal) => {
-        const sl = row.initialStopLoss;
-        if (sl == null || !Number.isFinite(Number(sl)) || !row.entryPrice) return "";
-        const s = Number(sl);
-        const entry = Number(row.entryPrice);
-        if (entry === 0) return s.toFixed(2);
-        // Risk % from entry (negative for buy SL below, positive distance for sell SL above shown as risk)
-        const pct =
-          row.side === "sell"
-            ? ((s - entry) / entry) * 100
-            : ((s - entry) / entry) * 100;
-        return `${s.toLocaleString("en-IN", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
-      };
+    const formatSl = (row: Signal) => {
+      const sl = row.initialStopLoss;
+      if (sl == null || !Number.isFinite(Number(sl)) || !row.entryPrice) return "";
+      const s = Number(sl);
+      const entry = Number(row.entryPrice);
+      if (entry === 0) return s.toFixed(2);
+      const pct = ((s - entry) / entry) * 100;
+      return `${s.toLocaleString("en-IN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+    };
 
-      return [
+    return [
       columnFactories.createTextColumn<Signal>({
         field: "appSymbol",
         headerName: "Symbol",
@@ -186,9 +188,7 @@ export default function SignalsPage() {
         { field: "actions", headerName: "", width: 72 },
       ),
     ];
-    },
-    [],
-  );
+  }, []);
 
   return (
     <>
@@ -199,10 +199,14 @@ export default function SignalsPage() {
       ) : null}
       <ZenTable
         columns={columns}
-        rows={rows}
+        rows={visibleRows}
         getRowId={(r) => r.id}
         loading={loading}
-        emptyMessage="No signals matched. Click Run analysis (needs Angel bars synced — first run can take a few minutes)."
+        emptyMessage={
+          sectorCheck
+            ? "No sector-confirmed signals. Turn sector check off, or Run analysis again."
+            : "No signals matched. Click Run analysis."
+        }
       />
     </>
   );

@@ -70,8 +70,12 @@ public interface IInstrumentRepository
     Task EnsureDemoUserAsync(Guid userId, string email, string displayName, CancellationToken ct = default);
     Task SeedInstrumentIfMissingAsync(string symbol, string name, CancellationToken ct = default);
     Task EnsureUniverseMembershipAsync(string universe, string symbol, CancellationToken ct = default);
+    Task SeedSectorIndexIfMissingAsync(string symbol, string name, CancellationToken ct = default);
+    Task LinkEquityToSectorAsync(string equitySymbol, string sectorSymbol, CancellationToken ct = default);
+    Task<IReadOnlyList<Instrument>> GetSectorIndexesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<Guid>> GetSectorInstrumentIdsAsync(CancellationToken ct = default);
     Task<Guid?> GetSectorIdForInstrumentAsync(Guid instrumentId, CancellationToken ct = default);
+    Task<IReadOnlyList<AngelTokenRow>> GetActiveTokensForSectorsAsync(CancellationToken ct = default);
 }
 
 public interface IMarketDataRepository

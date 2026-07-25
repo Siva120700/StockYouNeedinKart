@@ -104,7 +104,75 @@ public sealed class UniverseSeedService
             await _instruments.EnsureUniverseMembershipAsync(UniverseCodes.Nifty100, symbol, ct);
         }
 
+        await SeedSectorsAndLinksAsync(ct);
+
         _logger.LogInformation("Universe seed completed ({N50} Nifty50 + {Extra} Nifty100 extras).",
             Nifty50.Length, Nifty100Extra.Length);
     }
+
+    private static readonly (string Symbol, string Name, string AngelNameContains)[] Sectors =
+    [
+        ("NIFTYBANK", "Nifty Bank", "Nifty Bank"),
+        ("NIFTYIT", "Nifty IT", "Nifty IT"),
+        ("NIFTYPHARMA", "Nifty Pharma", "Nifty Pharma"),
+        ("NIFTYFMCG", "Nifty FMCG", "Nifty FMCG"),
+        ("NIFTYAUTO", "Nifty Auto", "Nifty Auto"),
+        ("NIFTYMETAL", "Nifty Metal", "Nifty Metal"),
+        ("NIFTYENERGY", "Nifty Energy", "Nifty Energy"),
+        ("NIFTYREALTY", "Nifty Realty", "Nifty Realty"),
+        ("NIFTYFINSERVICE", "Nifty Financial Services", "Nifty Fin Service"),
+        ("NIFTYINFRA", "Nifty Infrastructure", "Nifty Infra"),
+        ("NIFTYMEDIA", "Nifty Media", "Nifty Media"),
+        ("NIFTYPSUBANK", "Nifty PSU Bank", "Nifty PSU Bank"),
+        ("NIFTYPVTBANK", "Nifty Private Bank", "Nifty Private Bank"),
+        ("NIFTYHEALTHCARE", "Nifty Healthcare", "Nifty Healthcare"),
+        ("NIFTYCONSUMER", "Nifty Consumer Durables", "Nifty Consumer Durables"),
+    ];
+
+    // Equity → sector index symbol
+    private static readonly Dictionary<string, string> EquitySector = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["HDFCBANK"] = "NIFTYBANK", ["ICICIBANK"] = "NIFTYBANK", ["SBIN"] = "NIFTYBANK",
+        ["AXISBANK"] = "NIFTYBANK", ["KOTAKBANK"] = "NIFTYBANK", ["INDUSINDBK"] = "NIFTYBANK",
+        ["BANKBARODA"] = "NIFTYPSUBANK",
+        ["TCS"] = "NIFTYIT", ["INFY"] = "NIFTYIT", ["HCLTECH"] = "NIFTYIT", ["WIPRO"] = "NIFTYIT",
+        ["TECHM"] = "NIFTYIT", ["LTIM"] = "NIFTYIT",
+        ["SUNPHARMA"] = "NIFTYPHARMA", ["CIPLA"] = "NIFTYPHARMA", ["DRREDDY"] = "NIFTYPHARMA",
+        ["DIVISLAB"] = "NIFTYPHARMA", ["APOLLOHOSP"] = "NIFTYHEALTHCARE",
+        ["HINDUNILVR"] = "NIFTYFMCG", ["ITC"] = "NIFTYFMCG", ["NESTLEIND"] = "NIFTYFMCG",
+        ["BRITANNIA"] = "NIFTYFMCG", ["TATACONSUM"] = "NIFTYFMCG", ["GODREJCP"] = "NIFTYFMCG",
+        ["MARUTI"] = "NIFTYAUTO", ["TATAMOTORS"] = "NIFTYAUTO", ["M&M"] = "NIFTYAUTO",
+        ["EICHERMOT"] = "NIFTYAUTO", ["HEROMOTOCO"] = "NIFTYAUTO",
+        ["TATASTEEL"] = "NIFTYMETAL", ["JSWSTEEL"] = "NIFTYMETAL", ["HINDALCO"] = "NIFTYMETAL", ["VEDL"] = "NIFTYMETAL",
+        ["RELIANCE"] = "NIFTYENERGY", ["ONGC"] = "NIFTYENERGY", ["NTPC"] = "NIFTYENERGY",
+        ["POWERGRID"] = "NIFTYENERGY", ["BPCL"] = "NIFTYENERGY", ["COALINDIA"] = "NIFTYENERGY",
+        ["DLF"] = "NIFTYREALTY",
+        ["BAJFINANCE"] = "NIFTYFINSERVICE", ["BAJAJFINSV"] = "NIFTYFINSERVICE",
+        ["SBILIFE"] = "NIFTYFINSERVICE", ["HDFCLIFE"] = "NIFTYFINSERVICE",
+        ["LT"] = "NIFTYINFRA", ["ADANIPORTS"] = "NIFTYINFRA", ["ADANIENT"] = "NIFTYINFRA", ["SIEMENS"] = "NIFTYINFRA",
+        ["ULTRACEMCO"] = "NIFTYINFRA", ["AMBUJACEM"] = "NIFTYINFRA", ["GRASIM"] = "NIFTYINFRA",
+        ["ASIANPAINT"] = "NIFTYCONSUMER", ["TITAN"] = "NIFTYCONSUMER", ["HAVELLS"] = "NIFTYCONSUMER",
+        ["PIDILITIND"] = "NIFTYCONSUMER", ["DMART"] = "NIFTYCONSUMER", ["TRENT"] = "NIFTYCONSUMER",
+        ["BHARTIARTL"] = "NIFTYMEDIA", ["INDIGO"] = "NIFTYINFRA", ["BEL"] = "NIFTYINFRA",
+    };
+
+    private async Task SeedSectorsAndLinksAsync(CancellationToken ct)
+    {
+        foreach (var (symbol, name, _) in Sectors)
+            await _instruments.SeedSectorIndexIfMissingAsync(symbol, name, ct);
+
+        var linked = 0;
+        foreach (var (equity, sector) in EquitySector)
+        {
+            await _instruments.LinkEquityToSectorAsync(equity, sector, ct);
+            linked++;
+        }
+
+        _logger.LogInformation("Seeded {SectorCount} sector indexes and linked {Linked} equities.",
+            Sectors.Length, linked);
+    }
+
+    /// <summary>Angel scrip-master name fragment used to match NSE AMXIDX tokens.</summary>
+    public static IReadOnlyDictionary<string, string> SectorAngelNameHints { get; } =
+        Sectors.ToDictionary(s => s.Symbol, s => s.AngelNameContains, StringComparer.OrdinalIgnoreCase);
 }

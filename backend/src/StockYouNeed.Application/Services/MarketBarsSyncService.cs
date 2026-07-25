@@ -40,16 +40,57 @@ public sealed class MarketBarsSyncService
         }
 
         await _angel.EnsureSessionAsync(ct);
-        var tokens = await _instruments.GetActiveTokensForUniversesAsync(ct);
+        var tokens = (await _instruments.GetActiveTokensForUniversesAsync(ct)).ToList();
+        var sectorTokens = await _instruments.GetActiveTokensForSectorsAsync(ct);
+        foreach (var t in sectorTokens)
+            tokens.Add(t);
+
         if (tokens.Count == 0)
         {
             _logger.LogWarning("No Angel tokens mapped; run token sync first.");
             return 0;
         }
 
+        return await SyncTokensBarsAsync(tokens, ct);
+    }
+
+    /// <summary>Fetch/upsert last N daily bars only for sector indexes that lack history.</summary>
+    public async Task<int> SyncMissingSectorBarsAsync(CancellationToken ct = default)
+    {
+        if (!_angelOptions.Enabled)
+            return 0;
+
+        var sectorTokens = await _instruments.GetActiveTokensForSectorsAsync(ct);
+        if (sectorTokens.Count == 0)
+        {
+            _logger.LogWarning("No sector Angel tokens mapped yet.");
+            return 0;
+        }
+
+        var missing = new List<AngelTokenRow>();
+        foreach (var token in sectorTokens)
+        {
+            var bars = await _market.GetBarsForInstrumentAsync(token.InstrumentId, 5, ct);
+            if (bars.Count < 5)
+                missing.Add(token);
+        }
+
+        if (missing.Count == 0)
+        {
+            _logger.LogInformation("All {Count} sector indexes already have bars.", sectorTokens.Count);
+            return 0;
+        }
+
+        _logger.LogInformation("Syncing bars for {Count} sector indexes missing history…", missing.Count);
+        await _angel.EnsureSessionAsync(ct);
+        return await SyncTokensBarsAsync(missing, ct);
+    }
+
+    private async Task<int> SyncTokensBarsAsync(IReadOnlyList<AngelTokenRow> tokens, CancellationToken ct)
+    {
         var lookback = Math.Max(10, _schedule.MarketBarsLookbackDays);
         // Calendar buffer to cover weekends/holidays for ~N trading days
-        var toIst = DateTime.Now; // worker should run in IST or convert; candles accept local-like strings
+        var toIst = DateTime.Now;
         var fromIst = toIst.Date.AddDays(-(lookback * 2 + 5));
 
         var barCount = 0;
@@ -61,7 +102,6 @@ public sealed class MarketBarsSyncService
                 var candles = await _angel.GetDailyCandlesAsync(
                     token.Exchange, token.SymbolToken, fromIst, toIst, ct);
 
-                // Keep last N by date
                 foreach (var candle in candles.OrderByDescending(c => c.TradeDate).Take(lookback))
                 {
                     await _market.UpsertMarketBarAsync(

@@ -121,6 +121,44 @@ public sealed class InstrumentRepository : IInstrumentRepository
         await conn.ExecuteAsync(new CommandDefinition(sql, new { universe, symbol }, cancellationToken: ct));
     }
 
+    public async Task SeedSectorIndexIfMissingAsync(string symbol, string name, CancellationToken ct = default)
+    {
+        const string sql = """
+            INSERT INTO instruments (kind, symbol, name, exchange)
+            VALUES ('sector_index', @symbol, @name, 'NSE')
+            ON CONFLICT (exchange, symbol, kind) DO UPDATE SET name = EXCLUDED.name, is_active = true
+            """;
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(new CommandDefinition(sql, new { symbol, name }, cancellationToken: ct));
+    }
+
+    public async Task LinkEquityToSectorAsync(string equitySymbol, string sectorSymbol, CancellationToken ct = default)
+    {
+        const string sql = """
+            UPDATE instruments e
+            SET sector_instrument_id = s.id, updated_at = now()
+            FROM instruments s
+            WHERE e.symbol = @equitySymbol AND e.kind = 'equity' AND e.exchange = 'NSE'
+              AND s.symbol = @sectorSymbol AND s.kind = 'sector_index' AND s.exchange = 'NSE'
+            """;
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(new CommandDefinition(sql, new { equitySymbol, sectorSymbol }, cancellationToken: ct));
+    }
+
+    public async Task<IReadOnlyList<Instrument>> GetSectorIndexesAsync(CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT id AS Id, kind AS Kind, symbol AS Symbol, name AS Name,
+                   exchange AS Exchange, is_active AS IsActive
+            FROM instruments
+            WHERE kind = 'sector_index' AND is_active
+            ORDER BY symbol
+            """;
+        using var conn = _db.CreateConnection();
+        var rows = await conn.QueryAsync<Instrument>(new CommandDefinition(sql, cancellationToken: ct));
+        return rows.ToList();
+    }
+
     public async Task<IReadOnlyList<Guid>> GetSectorInstrumentIdsAsync(CancellationToken ct = default)
     {
         const string sql = """
@@ -138,5 +176,27 @@ public sealed class InstrumentRepository : IInstrumentRepository
             """;
         using var conn = _db.CreateConnection();
         return await conn.QuerySingleOrDefaultAsync<Guid?>(new CommandDefinition(sql, new { instrumentId }, cancellationToken: ct));
+    }
+
+    public async Task<IReadOnlyList<AngelTokenRow>> GetActiveTokensForSectorsAsync(CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT
+              m.instrument_id AS InstrumentId,
+              m.exchange::text AS Exchange,
+              m.symbol_token AS SymbolToken,
+              m.trading_symbol AS TradingSymbol,
+              m.name AS Name,
+              i.symbol AS AppSymbol
+            FROM angel_instrument_map m
+            JOIN instruments i ON i.id = m.instrument_id
+            WHERE m.is_active
+              AND i.kind = 'sector_index'
+              AND i.is_active
+            ORDER BY i.symbol
+            """;
+        using var conn = _db.CreateConnection();
+        var rows = await conn.QueryAsync<AngelTokenRow>(new CommandDefinition(sql, cancellationToken: ct));
+        return rows.ToList();
     }
 }

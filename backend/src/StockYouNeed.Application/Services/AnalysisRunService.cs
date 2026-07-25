@@ -14,6 +14,8 @@ public sealed class AnalysisRunService
     private readonly IMarketDataRepository _market;
     private readonly IPortfolioRepository _portfolio;
     private readonly MarketBarsSyncService _barsSync;
+    private readonly TokenSyncService _tokenSync;
+    private readonly UniverseSeedService _universeSeed;
     private readonly AngelOptions _options;
     private readonly ILogger<AnalysisRunService> _logger;
 
@@ -23,6 +25,8 @@ public sealed class AnalysisRunService
         IMarketDataRepository market,
         IPortfolioRepository portfolio,
         MarketBarsSyncService barsSync,
+        TokenSyncService tokenSync,
+        UniverseSeedService universeSeed,
         IOptions<AngelOptions> options,
         ILogger<AnalysisRunService> logger)
     {
@@ -31,6 +35,8 @@ public sealed class AnalysisRunService
         _market = market;
         _portfolio = portfolio;
         _barsSync = barsSync;
+        _tokenSync = tokenSync;
+        _universeSeed = universeSeed;
         _options = options.Value;
         _logger = logger;
     }
@@ -179,25 +185,42 @@ public sealed class AnalysisRunService
                 _logger.LogWarning("Angel disabled — screening uses existing market_bars only.");
             }
 
-            // Build sector bars cache for sector confirmation
+            // Sector confirmation evidence (always computed; UI toggle filters client-side).
             var sectorBarsCache = new Dictionary<Guid, List<MarketBarRow>>();
-            if (includeSectorCheck)
+            try
             {
-                var sectorIds = await _instruments.GetSectorInstrumentIdsAsync(ct);
-                foreach (var sectorId in sectorIds)
+                await _universeSeed.SeedAsync(ct);
+                if (_options.Enabled)
                 {
-                    var sBars = (await _market.GetBarsForInstrumentAsync(sectorId, 10, ct))
-                        .OrderByDescending(b => b.TradeDate)
-                        .ToList();
-                    if (sBars.Count >= 3)
-                        sectorBarsCache[sectorId] = sBars;
+                    var sectorTokens = await _instruments.GetActiveTokensForSectorsAsync(ct);
+                    if (sectorTokens.Count == 0)
+                        await _tokenSync.SyncUniverseTokensAsync(ct);
+                    await _barsSync.SyncMissingSectorBarsAsync(ct);
                 }
             }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Sector prep failed — sectorConfirmed may be false for many rows.");
+            }
+
+            var sectorIds = await _instruments.GetSectorInstrumentIdsAsync(ct);
+            foreach (var sectorId in sectorIds)
+            {
+                var sBars = (await _market.GetBarsForInstrumentAsync(sectorId, 10, ct))
+                    .OrderByDescending(b => b.TradeDate)
+                    .ToList();
+                if (sBars.Count >= 3)
+                    sectorBarsCache[sectorId] = sBars;
+            }
+
+            _logger.LogInformation(
+                "Sector evidence: {SectorIds} sectors, {WithBars} with bars (includeSectorCheck={IncludeSectorCheck} ignored for filtering).",
+                sectorIds.Count, sectorBarsCache.Count, includeSectorCheck);
 
             var signalCount = 0;
             var skippedFewBars = 0;
             var noSetup = 0;
-            var sectorRejected = 0;
+            var sectorConfirmedCount = 0;
             foreach (var instrumentId in instrumentIds)
             {
                 var bars = (await _market.GetBarsForInstrumentAsync(instrumentId, 10, ct))
@@ -217,29 +240,26 @@ public sealed class AnalysisRunService
                     continue;
                 }
 
-                // Sector confirmation: if enabled, check sector also breaks 2-day range
-                if (includeSectorCheck)
+                var sectorId = await _instruments.GetSectorIdForInstrumentAsync(instrumentId, ct);
+                if (sectorId is not null && sectorBarsCache.TryGetValue(sectorId.Value, out var sectorBars))
                 {
-                    var sectorId = await _instruments.GetSectorIdForInstrumentAsync(instrumentId, ct);
-                    if (sectorId is not null && sectorBarsCache.TryGetValue(sectorId.Value, out var sectorBars))
-                    {
-                        var sectorConfirmed = CheckSectorConfirmation(signal.Side, sectorBars);
-                        signal.SectorConfirmed = sectorConfirmed;
-                        if (!sectorConfirmed)
-                        {
-                            sectorRejected++;
-                            continue;
-                        }
-                    }
+                    signal.SectorConfirmed = CheckSectorConfirmation(signal.Side, sectorBars);
                 }
+                else
+                {
+                    signal.SectorConfirmed = false;
+                }
+
+                if (signal.SectorConfirmed)
+                    sectorConfirmedCount++;
 
                 await _portfolio.InsertSignalAsync(signal, ct);
                 signalCount++;
             }
 
             _logger.LogInformation(
-                "Analysis {RunId}: scanned={Scanned}, signals={Signals}, fewBars={FewBars}, noSetup={NoSetup}, sectorRejected={SectorRejected}, liveQuotes={LiveQuotes}",
-                runId, instrumentIds.Count, signalCount, skippedFewBars, noSetup, sectorRejected, livePrices.Count);
+                "Analysis {RunId}: scanned={Scanned}, signals={Signals}, sectorConfirmed={SectorConfirmed}, fewBars={FewBars}, noSetup={NoSetup}, liveQuotes={LiveQuotes}",
+                runId, instrumentIds.Count, signalCount, sectorConfirmedCount, skippedFewBars, noSetup, livePrices.Count);
 
             await _portfolio.CompleteAnalysisRunAsync(
                 runId,
@@ -249,9 +269,9 @@ public sealed class AnalysisRunService
                 {
                     scanned = instrumentIds.Count,
                     signals = signalCount,
+                    sectorConfirmed = sectorConfirmedCount,
                     fewBars = skippedFewBars,
                     noSetup,
-                    sectorRejected,
                     liveQuotes = livePrices.Count
                 },
                 ct);
@@ -419,7 +439,7 @@ public sealed class AnalysisRunService
             TargetT2 = t2,
             TargetT3 = t3,
             VolumeOk = volumeOk,
-            SectorConfirmed = true,
+            SectorConfirmed = false, // overwritten by sector confirmation after Evaluate
             Ma2d = ma2,
             Ma3d = ma3,
             Ma5d = ma5,

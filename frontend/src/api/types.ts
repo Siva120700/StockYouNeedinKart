@@ -20,6 +20,7 @@ export type Signal = {
   targetT2?: number | null;
   targetT3?: number | null;
   volumeOk: boolean;
+  sectorConfirmed: boolean;
 };
 
 export type OpenPosition = {

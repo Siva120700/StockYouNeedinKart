@@ -20,7 +20,7 @@ export const DataFactory = {
       `query ($runId: UUID) {
         signals(runId: $runId) {
           id analysisRunId instrumentId appSymbol instrumentName side
-          entryPrice initialStopLoss targetT1 targetT2 targetT3 volumeOk
+          entryPrice initialStopLoss targetT1 targetT2 targetT3 volumeOk sectorConfirmed
         }
       }`,
       { runId: runId ?? null },
@@ -49,15 +49,14 @@ export const DataFactory = {
 };
 
 export const ActionFactory = {
-  async runAnalysis(includeSectorCheck = false): Promise<AnalysisRun> {
-    const data = await gql<{ runAnalysis: AnalysisRun }>(
-      `mutation ($sector: Boolean!) {
-        runAnalysis(includeNifty50: true, includeNifty100: true, includeWatchlist: true, includeSectorCheck: $sector) {
+  async runAnalysis(): Promise<AnalysisRun> {
+    const data = await gql<{ runAnalysis: AnalysisRun }>(`
+      mutation {
+        runAnalysis(includeNifty50: true, includeNifty100: true, includeWatchlist: true, includeSectorCheck: false) {
           id status asOfDate
         }
-      }`,
-      { sector: includeSectorCheck },
-    );
+      }
+    `);
     return data.runAnalysis;
   },
 
