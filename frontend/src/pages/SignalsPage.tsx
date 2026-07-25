@@ -85,7 +85,41 @@ export default function SignalsPage() {
   }, [running, sectorCheck]);
 
   const columns = useMemo(
-    () => [
+    () => {
+      const formatTarget = (row: Signal, target: number | null | undefined) => {
+        if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice)
+          return "";
+        const t = Number(target);
+        const entry = Number(row.entryPrice);
+        if (entry === 0) return t.toFixed(2);
+        const pct =
+          row.side === "sell"
+            ? ((entry - t) / entry) * 100
+            : ((t - entry) / entry) * 100;
+        return `${t.toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+      };
+
+      const formatSl = (row: Signal) => {
+        const sl = row.initialStopLoss;
+        if (sl == null || !Number.isFinite(Number(sl)) || !row.entryPrice) return "";
+        const s = Number(sl);
+        const entry = Number(row.entryPrice);
+        if (entry === 0) return s.toFixed(2);
+        // Risk % from entry (negative for buy SL below, positive distance for sell SL above shown as risk)
+        const pct =
+          row.side === "sell"
+            ? ((s - entry) / entry) * 100
+            : ((s - entry) / entry) * 100;
+        return `${s.toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+      };
+
+      return [
       columnFactories.createTextColumn<Signal>({
         field: "appSymbol",
         headerName: "Symbol",
@@ -111,19 +145,29 @@ export default function SignalsPage() {
         minDecimalPlaces: 2,
         getValue: (r) => r.entryPrice,
       }),
-      columnFactories.createNumberColumn<Signal>({
+      columnFactories.createTextColumn<Signal>({
         field: "initialStopLoss",
         headerName: "SL",
-        width: 110,
-        minDecimalPlaces: 2,
-        getValue: (r) => r.initialStopLoss,
+        width: 150,
+        getValue: (r) => formatSl(r),
       }),
-      columnFactories.createNumberColumn<Signal>({
+      columnFactories.createTextColumn<Signal>({
         field: "targetT1",
         headerName: "T1",
-        width: 100,
-        minDecimalPlaces: 2,
-        getValue: (r) => r.targetT1,
+        width: 150,
+        getValue: (r) => formatTarget(r, r.targetT1),
+      }),
+      columnFactories.createTextColumn<Signal>({
+        field: "targetT2",
+        headerName: "T2",
+        width: 150,
+        getValue: (r) => formatTarget(r, r.targetT2),
+      }),
+      columnFactories.createTextColumn<Signal>({
+        field: "targetT3",
+        headerName: "T3",
+        width: 150,
+        getValue: (r) => formatTarget(r, r.targetT3),
       }),
       columnFactories.createBooleanColumn<Signal>({
         field: "volumeOk",
@@ -141,7 +185,8 @@ export default function SignalsPage() {
         ],
         { field: "actions", headerName: "", width: 72 },
       ),
-    ],
+    ];
+    },
     [],
   );
 
@@ -157,7 +202,7 @@ export default function SignalsPage() {
         rows={rows}
         getRowId={(r) => r.id}
         loading={loading}
-        emptyMessage="No signals — click Run analysis after bars are synced."
+        emptyMessage="No signals matched. Click Run analysis (needs Angel bars synced — first run can take a few minutes)."
       />
     </>
   );

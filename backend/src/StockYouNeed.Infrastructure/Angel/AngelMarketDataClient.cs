@@ -81,6 +81,12 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
 
             var res = await _http.SendAsync(req, ct);
             var body = await res.Content.ReadAsStringAsync(ct);
+            if (!res.IsSuccessStatusCode || string.IsNullOrWhiteSpace(body) || body[0] is not ('{' or '['))
+            {
+                throw new InvalidOperationException(
+                    $"Angel login HTTP {(int)res.StatusCode}. Check SmartAPI IP whitelist / credentials. Body: {(body.Length > 180 ? body[..180] : body)}");
+            }
+
             using var doc = JsonDocument.Parse(body);
             var root = doc.RootElement;
             var status = root.TryGetProperty("status", out var st) && st.GetBoolean();
@@ -113,6 +119,13 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
 
         var res = await _http.SendAsync(req, ct);
         var body = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode || string.IsNullOrWhiteSpace(body) || body[0] is not ('{' or '['))
+        {
+            _logger.LogWarning("Quote fetch HTTP {Status}: {Body}",
+                (int)res.StatusCode, body.Length > 200 ? body[..200] : body);
+            return Array.Empty<AngelQuote>();
+        }
+
         using var doc = JsonDocument.Parse(body);
         var root = doc.RootElement;
         var ok = (root.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.True)
@@ -169,6 +182,13 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
 
         var res = await _http.SendAsync(req, ct);
         var body = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode || string.IsNullOrWhiteSpace(body) || body[0] is not ('{' or '['))
+        {
+            _logger.LogWarning("Candle fetch HTTP {Status} for {Token}: {Body}",
+                (int)res.StatusCode, symbolToken, body.Length > 200 ? body[..200] : body);
+            return Array.Empty<AngelCandle>();
+        }
+
         using var doc = JsonDocument.Parse(body);
         var root = doc.RootElement;
         var ok = root.TryGetProperty("status", out var st) && st.GetBoolean();

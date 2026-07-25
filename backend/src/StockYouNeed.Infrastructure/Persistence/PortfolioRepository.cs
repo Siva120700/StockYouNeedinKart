@@ -48,7 +48,18 @@ public sealed class PortfolioRepository : IPortfolioRepository
             FROM analysis_signals s
             JOIN instruments i ON i.id = s.instrument_id
             WHERE s.user_id = @userId
-              AND (@runId IS NULL OR s.analysis_run_id = @runId)
+              AND (
+                (@runId IS NOT NULL AND s.analysis_run_id = @runId)
+                OR (
+                  @runId IS NULL
+                  AND s.analysis_run_id = (
+                    SELECT r.id FROM analysis_runs r
+                    WHERE r.user_id = @userId AND r.status = 'succeeded'
+                    ORDER BY r.started_at DESC
+                    LIMIT 1
+                  )
+                )
+              )
             ORDER BY s.created_at DESC
             LIMIT 500
             """;
@@ -181,8 +192,36 @@ public sealed class PortfolioRepository : IPortfolioRepository
 
     public async Task<AnalysisSignalRow?> GetSignalAsync(Guid signalId, Guid userId, CancellationToken ct = default)
     {
-        var all = await GetSignalsAsync(userId, null, ct);
-        return all.FirstOrDefault(s => s.Id == signalId);
+        const string sql = """
+            SELECT
+              s.id AS Id,
+              s.analysis_run_id AS AnalysisRunId,
+              s.user_id AS UserId,
+              s.instrument_id AS InstrumentId,
+              i.symbol AS AppSymbol,
+              i.name AS InstrumentName,
+              s.side::text AS Side,
+              s.as_of_date AS AsOfDate,
+              s.entry_price AS EntryPrice,
+              s.initial_stop_loss AS InitialStopLoss,
+              s.target_t1 AS TargetT1,
+              s.target_t2 AS TargetT2,
+              s.target_t3 AS TargetT3,
+              s.volume_ok AS VolumeOk,
+              s.sector_confirmed AS SectorConfirmed,
+              s.ma_2d AS Ma2d,
+              s.ma_3d AS Ma3d,
+              s.ma_5d AS Ma5d,
+              s.last_2d_high AS Last2dHigh,
+              s.last_2d_low AS Last2dLow
+            FROM analysis_signals s
+            JOIN instruments i ON i.id = s.instrument_id
+            WHERE s.id = @signalId AND s.user_id = @userId
+            """;
+        using var conn = _db.CreateConnection();
+        await SetUserAsync(conn, userId);
+        return await conn.QuerySingleOrDefaultAsync<AnalysisSignalRow>(
+            new CommandDefinition(sql, new { signalId, userId }, cancellationToken: ct));
     }
 
     public async Task<Guid> OpenPositionFromSignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default)

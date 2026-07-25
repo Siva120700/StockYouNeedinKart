@@ -76,8 +76,8 @@ public sealed class MarketBarsSyncService
                     barCount++;
                 }
 
-                // Angel historical is also rate-limited; pace lightly
-                await Task.Delay(350, ct);
+                // Angel historical is rate-limited; pace to avoid 403 Access denied
+                await Task.Delay(900, ct);
             }
             catch (Exception ex)
             {
