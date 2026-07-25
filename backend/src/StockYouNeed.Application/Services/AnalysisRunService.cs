@@ -338,24 +338,31 @@ public sealed class AnalysisRunService
         var avgVolPrior3 = prior3.Average(b => (double)b.Volume);
         var volumeOk = latest.Volume >= (long)(avgVolPrior3 * 0.25);
 
-        // Breakout vs last 2 sessions. LTP only used to resolve buy+sell same day.
+        // Breakout or imminent (within 0.5% of last-2-day high/low). LTP resolves buy+sell same day.
+        const decimal ImminentMargin = 0.005m;
         var ltp = livePrice ?? latest.Close;
 
         string? side = null;
         var buyBreak = latest.High > last2High;
         var sellBreak = latest.Low < last2Low;
-        if (buyBreak && sellBreak && volumeOk)
+        var buyImminent = !buyBreak && ltp >= last2High * (1m - ImminentMargin);
+        var sellImminent = !sellBreak && ltp <= last2Low * (1m + ImminentMargin);
+
+        if ((buyBreak || buyImminent) && (sellBreak || sellImminent) && volumeOk)
         {
             var mid = (last2High + last2Low) / 2m;
             side = ltp >= mid ? SignalSides.Buy : SignalSides.Sell;
         }
-        else if (buyBreak && volumeOk)
+        else if ((buyBreak || buyImminent) && volumeOk)
             side = SignalSides.Buy;
-        else if (sellBreak && volumeOk)
+        else if ((sellBreak || sellImminent) && volumeOk)
             side = SignalSides.Sell;
 
         if (side is null)
             return null;
+
+        // Fresh = first breakout/imminent in the last ~5 sessions (no prior day also broke its own 2-day range).
+        var freshCross = IsFreshCross(barsDesc, side);
 
         // Entry = breakout level: last-2-day high (buy) / last-2-day low (sell).
         var entry = side == SignalSides.Buy ? last2High : last2Low;
@@ -440,12 +447,35 @@ public sealed class AnalysisRunService
             TargetT3 = t3,
             VolumeOk = volumeOk,
             SectorConfirmed = false, // overwritten by sector confirmation after Evaluate
+            FreshCross = freshCross,
             Ma2d = ma2,
             Ma3d = ma3,
             Ma5d = ma5,
             Last2dHigh = last2High,
             Last2dLow = last2Low
         };
+    }
+
+    /// <summary>
+    /// True when no earlier day in the last ~5 sessions already broke its own prior-2-day high/low.
+    /// Filters out stocks that have been repeatedly breaking out.
+    /// </summary>
+    private static bool IsFreshCross(List<MarketBarRow> barsNewestFirst, string side)
+    {
+        var priorBreakouts = 0;
+        // indices 1..3 = recent prior days that still have 2 sessions behind them
+        for (var i = 1; i <= 3 && i + 2 < barsNewestFirst.Count; i++)
+        {
+            var day = barsNewestFirst[i];
+            var priorHigh = Math.Max(barsNewestFirst[i + 1].High, barsNewestFirst[i + 2].High);
+            var priorLow = Math.Min(barsNewestFirst[i + 1].Low, barsNewestFirst[i + 2].Low);
+            if (side == SignalSides.Buy && day.High > priorHigh)
+                priorBreakouts++;
+            else if (side == SignalSides.Sell && day.Low < priorLow)
+                priorBreakouts++;
+        }
+
+        return priorBreakouts == 0;
     }
 
     /// <summary>

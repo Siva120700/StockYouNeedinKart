@@ -86,26 +86,46 @@ public sealed class LtpPollHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+        // Always refresh once on startup (Angel returns last LTP even off-hours).
+        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+        await PollSafeAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                if (IsLikelyMarketHoursIst())
-                {
-                    using var scope = _sp.CreateScope();
-                    var poller = scope.ServiceProvider.GetRequiredService<LtpPollService>();
-                    var n = await poller.PollOnceAsync(stoppingToken);
-                    if (n > 0)
-                        _logger.LogDebug("LTP updated {Count} instruments", n);
-                }
+                await PollSafeAsync(stoppingToken);
+
+                // Market hours: configured interval. Off-hours: every 15 min so weekend/holiday
+                // still get a periodic last-traded refresh without hammering Angel.
+                var delaySec = IsLikelyMarketHoursIst()
+                    ? Math.Max(2, _schedule.LtpPollIntervalSeconds)
+                    : 15 * 60;
+                await Task.Delay(TimeSpan.FromSeconds(delaySec), stoppingToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "LTP poll error");
+                _logger.LogError(ex, "LTP poll loop error");
+                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
             }
+        }
+    }
 
-            await Task.Delay(TimeSpan.FromSeconds(Math.Max(2, _schedule.LtpPollIntervalSeconds)), stoppingToken);
+    private async Task PollSafeAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _sp.CreateScope();
+            var poller = scope.ServiceProvider.GetRequiredService<LtpPollService>();
+            var n = await poller.PollOnceAsync(ct);
+            if (n > 0)
+                _logger.LogInformation("LTP updated {Count} instruments", n);
+            else
+                _logger.LogDebug("LTP poll completed with 0 updates");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "LTP poll error");
         }
     }
 

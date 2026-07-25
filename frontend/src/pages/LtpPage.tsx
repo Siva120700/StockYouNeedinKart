@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button } from "@mui/material";
 import { ArrowsClockwise } from "@phosphor-icons/react";
-import { DataFactory } from "../api/factories";
+import { ActionFactory, DataFactory } from "../api/factories";
 import type { LtpQuote } from "../api/types";
 import { columnFactories } from "../zen_components/table/columnFactories";
 import ZenTable from "../zen_components/table/ZenTable";
@@ -15,9 +15,10 @@ export default function LtpPage() {
     useZenPrimaryLayoutContext();
   const [rows, setRows] = useState<LtpQuote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function refresh() {
+  async function loadCached() {
     setError(null);
     setIsSyncing(true);
     try {
@@ -30,27 +31,50 @@ export default function LtpPage() {
     }
   }
 
+  /** Calls Angel via API, then reloads the table. */
+  async function refreshFromAngel() {
+    setError(null);
+    setRefreshing(true);
+    setIsSyncing(true);
+    try {
+      await ActionFactory.refreshLtp();
+      setRows(await DataFactory.ltp());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshing(false);
+      setLoading(false);
+      setIsSyncing(false);
+    }
+  }
+
   useEffect(() => {
     setTitle("Live LTP");
     setBreadcrumbs([{ label: "Home" }, { label: "Live LTP" }]);
-    setPageActions(
-      <Button
-        variant="outlined"
-        size="small"
-        startIcon={<ArrowsClockwise size={DEFAULT_SMALL_ICON_SIZE} />}
-        onClick={() => void refresh()}
-      >
-        Refresh
-      </Button>,
-    );
-    void refresh();
-    const id = window.setInterval(() => void refresh(), 15_000);
+    void loadCached();
+    // Light re-read of DB every 15s (Worker also writes during market hours).
+    const id = window.setInterval(() => void loadCached(), 15_000);
     return () => {
       window.clearInterval(id);
       setPageActions(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    setPageActions(
+      <Button
+        variant="outlined"
+        size="small"
+        disabled={refreshing}
+        startIcon={<ArrowsClockwise size={DEFAULT_SMALL_ICON_SIZE} />}
+        onClick={() => void refreshFromAngel()}
+      >
+        {refreshing ? "Fetching…" : "Refresh"}
+      </Button>,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshing]);
 
   const columns = useMemo(
     () => [
@@ -101,7 +125,7 @@ export default function LtpPage() {
         rows={rows}
         getRowId={(r) => r.instrumentId}
         loading={loading}
-        emptyMessage="No LTP yet — start Worker with Angel Enabled=true."
+        emptyMessage="No LTP yet — click Refresh (Angel Enabled=true)."
       />
     </>
   );

@@ -21,6 +21,7 @@ export type Signal = {
   targetT3?: number | null;
   volumeOk: boolean;
   sectorConfirmed: boolean;
+  freshCross: boolean;
 };
 
 export type OpenPosition = {

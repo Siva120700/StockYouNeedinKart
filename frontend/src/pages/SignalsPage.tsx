@@ -16,6 +16,7 @@ export default function SignalsPage() {
   const [running, setRunning] = useState(false);
   const [sectorCheck, setSectorCheck] = useState(false);
   const [riskRewardCheck, setRiskRewardCheck] = useState(false);
+  const [freshCrossCheck, setFreshCrossCheck] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -69,6 +70,7 @@ export default function SignalsPage() {
   const visibleRows = useMemo(() => {
     let list = rows;
     if (sectorCheck) list = list.filter((r) => r.sectorConfirmed);
+    if (freshCrossCheck) list = list.filter((r) => r.freshCross);
     if (riskRewardCheck) {
       list = list.filter((r) => {
         const rr = riskRewardRatio(r);
@@ -76,7 +78,7 @@ export default function SignalsPage() {
       });
     }
     return list;
-  }, [rows, sectorCheck, riskRewardCheck]);
+  }, [rows, sectorCheck, riskRewardCheck, freshCrossCheck]);
 
   useEffect(() => {
     setTitle("Signals");
@@ -88,7 +90,7 @@ export default function SignalsPage() {
 
   useEffect(() => {
     setPageActions(
-      <MuiStack direction="row" spacing={1} alignItems="center">
+      <MuiStack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
         <FormControlLabel
           control={
             <Switch
@@ -98,6 +100,17 @@ export default function SignalsPage() {
             />
           }
           label="Sector check"
+          sx={{ mr: 1 }}
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={freshCrossCheck}
+              onChange={(e) => setFreshCrossCheck(e.target.checked)}
+            />
+          }
+          label="Fresh cross"
           sx={{ mr: 1 }}
         />
         <FormControlLabel
@@ -123,7 +136,7 @@ export default function SignalsPage() {
       </MuiStack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, sectorCheck, riskRewardCheck, visibleRows.length]);
+  }, [running, sectorCheck, riskRewardCheck, freshCrossCheck, visibleRows.length]);
 
   const columns = useMemo(() => {
     const formatTarget = (row: Signal, target: number | null | undefined) => {
@@ -234,7 +247,7 @@ export default function SignalsPage() {
         getRowId={(r) => r.id}
         loading={loading}
         emptyMessage={
-          sectorCheck || riskRewardCheck
+          sectorCheck || riskRewardCheck || freshCrossCheck
             ? "No signals match the active filters. Turn filters off, or Run analysis again."
             : "No signals matched. Click Run analysis."
         }

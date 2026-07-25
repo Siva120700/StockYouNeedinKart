@@ -40,6 +40,7 @@ public sealed class PortfolioRepository : IPortfolioRepository
               s.target_t3 AS TargetT3,
               s.volume_ok AS VolumeOk,
               s.sector_confirmed AS SectorConfirmed,
+              s.fresh_cross AS FreshCross,
               s.ma_2d AS Ma2d,
               s.ma_3d AS Ma3d,
               s.ma_5d AS Ma5d,
@@ -177,12 +178,12 @@ public sealed class PortfolioRepository : IPortfolioRepository
             INSERT INTO analysis_signals (
               id, analysis_run_id, user_id, instrument_id, side, as_of_date,
               entry_price, initial_stop_loss, target_t1, target_t2, target_t3,
-              last_2d_high, last_2d_low, volume_ok, sector_confirmed,
+              last_2d_high, last_2d_low, volume_ok, sector_confirmed, fresh_cross,
               ma_2d, ma_3d, ma_5d, universe_tags)
             VALUES (
               @Id, @AnalysisRunId, @UserId, @InstrumentId, @Side::signal_side, @AsOfDate,
               @EntryPrice, @InitialStopLoss, @TargetT1, @TargetT2, @TargetT3,
-              @Last2dHigh, @Last2dLow, @VolumeOk, @SectorConfirmed,
+              @Last2dHigh, @Last2dLow, @VolumeOk, @SectorConfirmed, @FreshCross,
               @Ma2d, @Ma3d, @Ma5d, ARRAY['nifty_50']::text[])
             """;
         using var conn = _db.CreateConnection();
@@ -209,6 +210,7 @@ public sealed class PortfolioRepository : IPortfolioRepository
               s.target_t3 AS TargetT3,
               s.volume_ok AS VolumeOk,
               s.sector_confirmed AS SectorConfirmed,
+              s.fresh_cross AS FreshCross,
               s.ma_2d AS Ma2d,
               s.ma_3d AS Ma3d,
               s.ma_5d AS Ma5d,

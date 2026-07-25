@@ -6,7 +6,7 @@ using StockYouNeed.Application.Options;
 namespace StockYouNeed.Infrastructure.Persistence;
 
 /// <summary>
-/// Applies database/001_init.sql and database/002_angel_market_data.sql once (idempotent where possible).
+/// Applies database/00x_*.sql once (idempotent where possible).
 /// </summary>
 public sealed class DatabaseMigrator
 {
@@ -24,7 +24,9 @@ public sealed class DatabaseMigrator
         var files = new[]
         {
             Path.Combine(databaseRoot, "001_init.sql"),
-            Path.Combine(databaseRoot, "002_angel_market_data.sql")
+            Path.Combine(databaseRoot, "002_angel_market_data.sql"),
+            Path.Combine(databaseRoot, "003_targets_pct_windows.sql"),
+            Path.Combine(databaseRoot, "004_fresh_cross.sql"),
         };
 
         await using var conn = new NpgsqlConnection(_db.ConnectionString);

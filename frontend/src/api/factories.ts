@@ -20,7 +20,7 @@ export const DataFactory = {
       `query ($runId: UUID) {
         signals(runId: $runId) {
           id analysisRunId instrumentId appSymbol instrumentName side
-          entryPrice initialStopLoss targetT1 targetT2 targetT3 volumeOk sectorConfirmed
+          entryPrice initialStopLoss targetT1 targetT2 targetT3 volumeOk sectorConfirmed freshCross
         }
       }`,
       { runId: runId ?? null },
@@ -86,5 +86,11 @@ export const ActionFactory = {
       { instrumentId },
     );
     return data.addToWatchlist;
+  },
+
+  /** Pulls fresh quotes from Angel into market_ltp; returns how many rows updated. */
+  async refreshLtp(): Promise<number> {
+    const data = await gql<{ refreshLtp: number }>(`mutation { refreshLtp }`);
+    return data.refreshLtp;
   },
 };

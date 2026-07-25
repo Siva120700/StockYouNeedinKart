@@ -94,6 +94,7 @@ public sealed class AnalysisSignalRow
     public decimal? TargetT3 { get; set; }
     public bool VolumeOk { get; set; }
     public bool SectorConfirmed { get; set; }
+    public bool FreshCross { get; set; }
     public decimal? Ma2d { get; set; }
     public decimal? Ma3d { get; set; }
     public decimal? Ma5d { get; set; }

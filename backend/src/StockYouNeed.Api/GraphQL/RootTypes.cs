@@ -123,4 +123,10 @@ public sealed class Mutation
         await portfolio.ClosePositionAsync(user.UserId, positionId, exitPrice, reason, ct);
         return true;
     }
+
+    /// <summary>Fetches fresh LTP from Angel into market_ltp (works off-hours / weekends).</summary>
+    public async Task<int> RefreshLtp(
+        [Service] LtpPollService poller,
+        CancellationToken ct)
+        => await poller.PollOnceAsync(ct);
 }

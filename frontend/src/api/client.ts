@@ -15,7 +15,17 @@ export async function gql<T>(
   });
 
   if (!res.ok) {
-    throw new Error(`GraphQL HTTP ${res.status}`);
+    const body = await res.text();
+    let detail = body;
+    try {
+      const parsed = JSON.parse(body) as { errors?: { message: string }[] };
+      if (parsed.errors?.length) {
+        detail = parsed.errors.map((e) => e.message).join("; ");
+      }
+    } catch {
+      /* keep raw body */
+    }
+    throw new Error(`GraphQL HTTP ${res.status}: ${detail}`);
   }
 
   const json = (await res.json()) as {
