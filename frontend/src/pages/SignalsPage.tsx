@@ -15,6 +15,7 @@ export default function SignalsPage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [sectorCheck, setSectorCheck] = useState(false);
+  const [riskRewardCheck, setRiskRewardCheck] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -52,11 +53,30 @@ export default function SignalsPage() {
     }
   }
 
-  // Sector toggle filters already-loaded rows — no backend call.
-  const visibleRows = useMemo(
-    () => (sectorCheck ? rows.filter((r) => r.sectorConfirmed) : rows),
-    [rows, sectorCheck],
-  );
+  /** Risk-reward vs T1: reward/risk. Buy (T1-entry)/(entry-SL); sell (entry-T1)/(SL-entry). */
+  function riskRewardRatio(row: Signal): number | null {
+    const entry = Number(row.entryPrice);
+    const sl = Number(row.initialStopLoss);
+    const target = Number(row.targetT1 ?? row.targetT2 ?? row.targetT3);
+    if (![entry, sl, target].every((n) => Number.isFinite(n)) || entry === 0) return null;
+    const risk = row.side === "sell" ? sl - entry : entry - sl;
+    const reward = row.side === "sell" ? entry - target : target - entry;
+    if (risk <= 0 || reward <= 0) return null;
+    return reward / risk;
+  }
+
+  // Toggles filter already-loaded rows — no backend call.
+  const visibleRows = useMemo(() => {
+    let list = rows;
+    if (sectorCheck) list = list.filter((r) => r.sectorConfirmed);
+    if (riskRewardCheck) {
+      list = list.filter((r) => {
+        const rr = riskRewardRatio(r);
+        return rr != null && rr >= 1;
+      });
+    }
+    return list;
+  }, [rows, sectorCheck, riskRewardCheck]);
 
   useEffect(() => {
     setTitle("Signals");
@@ -80,6 +100,17 @@ export default function SignalsPage() {
           label="Sector check"
           sx={{ mr: 1 }}
         />
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={riskRewardCheck}
+              onChange={(e) => setRiskRewardCheck(e.target.checked)}
+            />
+          }
+          label="R:R ≥ 1"
+          sx={{ mr: 1 }}
+        />
         <Button
           variant="contained"
           size="small"
@@ -92,7 +123,7 @@ export default function SignalsPage() {
       </MuiStack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, sectorCheck, visibleRows.length]);
+  }, [running, sectorCheck, riskRewardCheck, visibleRows.length]);
 
   const columns = useMemo(() => {
     const formatTarget = (row: Signal, target: number | null | undefined) => {
@@ -203,8 +234,8 @@ export default function SignalsPage() {
         getRowId={(r) => r.id}
         loading={loading}
         emptyMessage={
-          sectorCheck
-            ? "No sector-confirmed signals. Turn sector check off, or Run analysis again."
+          sectorCheck || riskRewardCheck
+            ? "No signals match the active filters. Turn filters off, or Run analysis again."
             : "No signals matched. Click Run analysis."
         }
       />
