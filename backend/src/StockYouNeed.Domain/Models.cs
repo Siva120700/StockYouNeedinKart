@@ -45,6 +45,19 @@ public sealed class MarketBarRow
     public string Source { get; set; } = "angel";
 }
 
+public sealed class MarketIntradayBarRow
+{
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string Interval { get; set; } = "1h";
+    public DateTimeOffset BarTime { get; set; }
+    public decimal Open { get; set; }
+    public decimal High { get; set; }
+    public decimal Low { get; set; }
+    public decimal Close { get; set; }
+    public long Volume { get; set; }
+}
+
 public sealed class MarketOhlcRow
 {
     public Guid InstrumentId { get; set; }
@@ -100,6 +113,35 @@ public sealed class AnalysisSignalRow
     public decimal? Ma5d { get; set; }
     public decimal? Last2dHigh { get; set; }
     public decimal? Last2dLow { get; set; }
+}
+
+public sealed class LiquiditySignalRow
+{
+    public Guid Id { get; set; }
+    public Guid LiquidityRunId { get; set; }
+    public Guid UserId { get; set; }
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string InstrumentName { get; set; } = "";
+    public string Side { get; set; } = "";
+    public DateOnly AsOfDate { get; set; }
+    public decimal EntryPrice { get; set; }
+    public decimal InitialStopLoss { get; set; }
+    public decimal? TargetT1 { get; set; }
+    public decimal? TargetT2 { get; set; }
+    public decimal? TargetT3 { get; set; }
+    public decimal RelativeVolume { get; set; }
+    public decimal RvolPercentile { get; set; }
+    public bool RvolOk { get; set; }
+    public bool StrongClose { get; set; }
+    public string? SweepSide { get; set; }
+    public string? SweptZoneType { get; set; }
+    public decimal? SweptZonePrice { get; set; }
+    public string? NearestZoneType { get; set; }
+    public decimal? NearestZonePrice { get; set; }
+    public decimal? DistancePct { get; set; }
+    public string[] ZoneTags { get; set; } = Array.Empty<string>();
+    public string TimeframeContext { get; set; } = "4h_sweep+1h_confirm";
 }
 
 public sealed class OpenPositionRow

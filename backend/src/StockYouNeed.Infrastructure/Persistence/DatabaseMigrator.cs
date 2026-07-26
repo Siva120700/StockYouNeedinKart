@@ -27,6 +27,7 @@ public sealed class DatabaseMigrator
             Path.Combine(databaseRoot, "002_angel_market_data.sql"),
             Path.Combine(databaseRoot, "003_targets_pct_windows.sql"),
             Path.Combine(databaseRoot, "004_fresh_cross.sql"),
+            Path.Combine(databaseRoot, "005_liquidity_signals.sql"),
         };
 
         await using var conn = new NpgsqlConnection(_db.ConnectionString);

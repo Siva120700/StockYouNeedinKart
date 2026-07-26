@@ -1,4 +1,12 @@
-import type { AnalysisRun, LtpQuote, OpenPosition, Signal, User, WatchlistItem } from "./types";
+import type {
+  AnalysisRun,
+  LiquiditySignal,
+  LtpQuote,
+  OpenPosition,
+  Signal,
+  User,
+  WatchlistItem,
+} from "./types";
 import { gql } from "./client";
 
 /** Factory methods — frontend only fetches / triggers; no market math here. */
@@ -26,6 +34,22 @@ export const DataFactory = {
       { runId: runId ?? null },
     );
     return data.signals;
+  },
+
+  async liquiditySignals(runId?: string): Promise<LiquiditySignal[]> {
+    const data = await gql<{ liquiditySignals: LiquiditySignal[] }>(
+      `query ($runId: UUID) {
+        liquiditySignals(runId: $runId) {
+          id liquidityRunId instrumentId appSymbol instrumentName side
+          entryPrice initialStopLoss targetT1 targetT2 targetT3
+          relativeVolume rvolPercentile rvolOk strongClose
+          sweepSide sweptZoneType sweptZonePrice
+          nearestZoneType nearestZonePrice distancePct timeframeContext
+        }
+      }`,
+      { runId: runId ?? null },
+    );
+    return data.liquiditySignals;
   },
 
   async openPositions(): Promise<OpenPosition[]> {
@@ -60,6 +84,17 @@ export const ActionFactory = {
     return data.runAnalysis;
   },
 
+  async runLiquidityAnalysis(): Promise<AnalysisRun> {
+    const data = await gql<{ runLiquidityAnalysis: AnalysisRun }>(`
+      mutation {
+        runLiquidityAnalysis(includeNifty50: true, includeNifty100: true, includeWatchlist: true) {
+          id status asOfDate
+        }
+      }
+    `);
+    return data.runLiquidityAnalysis;
+  },
+
   async openPositionFromSignal(signalId: string, quantityLots = 1): Promise<string> {
     const data = await gql<{ openPositionFromSignal: string }>(
       `mutation ($signalId: UUID!, $quantityLots: Int!) {
@@ -68,6 +103,16 @@ export const ActionFactory = {
       { signalId, quantityLots },
     );
     return data.openPositionFromSignal;
+  },
+
+  async openPositionFromLiquiditySignal(signalId: string, quantityLots = 1): Promise<string> {
+    const data = await gql<{ openPositionFromLiquiditySignal: string }>(
+      `mutation ($signalId: UUID!, $quantityLots: Int!) {
+        openPositionFromLiquiditySignal(signalId: $signalId, quantityLots: $quantityLots)
+      }`,
+      { signalId, quantityLots },
+    );
+    return data.openPositionFromLiquiditySignal;
   },
 
   async closePosition(positionId: string, exitPrice: number): Promise<boolean> {

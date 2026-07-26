@@ -168,6 +168,23 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
         DateTime fromIst,
         DateTime toIst,
         CancellationToken ct = default)
+        => await FetchCandlesAsync(exchange, symbolToken, "ONE_DAY", fromIst, toIst, ct);
+
+    public async Task<IReadOnlyList<AngelCandle>> GetHourlyCandlesAsync(
+        string exchange,
+        string symbolToken,
+        DateTime fromIst,
+        DateTime toIst,
+        CancellationToken ct = default)
+        => await FetchCandlesAsync(exchange, symbolToken, "ONE_HOUR", fromIst, toIst, ct);
+
+    private async Task<IReadOnlyList<AngelCandle>> FetchCandlesAsync(
+        string exchange,
+        string symbolToken,
+        string interval,
+        DateTime fromIst,
+        DateTime toIst,
+        CancellationToken ct)
     {
         await EnsureSessionAsync(ct);
         using var req = CreateSecureRequest(HttpMethod.Post, "rest/secure/angelbroking/historical/v1/getCandleData");
@@ -175,7 +192,7 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
         {
             exchange,
             symboltoken = symbolToken,
-            interval = "ONE_DAY",
+            interval,
             fromdate = fromIst.ToString("yyyy-MM-dd HH:mm"),
             todate = toIst.ToString("yyyy-MM-dd HH:mm")
         });
@@ -184,8 +201,8 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
         var body = await res.Content.ReadAsStringAsync(ct);
         if (!res.IsSuccessStatusCode || string.IsNullOrWhiteSpace(body) || body[0] is not ('{' or '['))
         {
-            _logger.LogWarning("Candle fetch HTTP {Status} for {Token}: {Body}",
-                (int)res.StatusCode, symbolToken, body.Length > 200 ? body[..200] : body);
+            _logger.LogWarning("Candle fetch HTTP {Status} for {Token} ({Interval}): {Body}",
+                (int)res.StatusCode, symbolToken, interval, body.Length > 200 ? body[..200] : body);
             return Array.Empty<AngelCandle>();
         }
 
@@ -195,7 +212,7 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
         if (!ok)
         {
             var msg = root.TryGetProperty("message", out var m) ? m.GetString() : body;
-            _logger.LogWarning("Candle fetch failed for {Token}: {Message}", symbolToken, msg);
+            _logger.LogWarning("Candle fetch failed for {Token} ({Interval}): {Message}", symbolToken, interval, msg);
             return Array.Empty<AngelCandle>();
         }
 
@@ -203,7 +220,7 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
         if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
             return candles;
 
-        // [[timestamp, open, high, low, close, volume], ...]
+        var ist = TimeSpan.FromHours(5.5);
         foreach (var row in data.EnumerateArray())
         {
             if (row.GetArrayLength() < 6)
@@ -211,9 +228,12 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
             var ts = row[0].GetString() ?? "";
             if (!DateTime.TryParse(ts, out var dt))
                 continue;
+            // Angel timestamps are typically IST wall-clock without offset.
+            var barTime = new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Unspecified), ist);
             candles.Add(new AngelCandle
             {
                 TradeDate = DateOnly.FromDateTime(dt),
+                BarTime = barTime,
                 Open = row[1].GetDecimal(),
                 High = row[2].GetDecimal(),
                 Low = row[3].GetDecimal(),

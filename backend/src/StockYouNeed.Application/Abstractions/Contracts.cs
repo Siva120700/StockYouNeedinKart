@@ -23,6 +23,13 @@ public interface IAngelMarketDataClient
         DateTime toIst,
         CancellationToken ct = default);
 
+    Task<IReadOnlyList<AngelCandle>> GetHourlyCandlesAsync(
+        string exchange,
+        string symbolToken,
+        DateTime fromIst,
+        DateTime toIst,
+        CancellationToken ct = default);
+
     Task<IReadOnlyList<AngelScrip>> DownloadScripMasterAsync(CancellationToken ct = default);
 }
 
@@ -43,6 +50,8 @@ public sealed class AngelQuote
 public sealed class AngelCandle
 {
     public DateOnly TradeDate { get; set; }
+    /// <summary>Bar open time (IST wall clock as DateTimeOffset) for intraday intervals.</summary>
+    public DateTimeOffset? BarTime { get; set; }
     public decimal Open { get; set; }
     public decimal High { get; set; }
     public decimal Low { get; set; }
@@ -83,10 +92,13 @@ public interface IMarketDataRepository
     Task UpsertLtpAsync(Guid instrumentId, string exchange, string tradingSymbol, string symbolToken, decimal ltp, string rawJson, CancellationToken ct = default);
     Task UpsertOhlcAsync(Guid instrumentId, string exchange, string tradingSymbol, string symbolToken, decimal ltp, decimal open, decimal high, decimal low, decimal close, long tradeVolume, Guid? analysisRunId, string rawJson, CancellationToken ct = default);
     Task UpsertMarketBarAsync(Guid instrumentId, DateOnly tradeDate, decimal open, decimal high, decimal low, decimal close, long volume, CancellationToken ct = default);
+    Task UpsertIntradayBarAsync(Guid instrumentId, string interval, DateTimeOffset barTime, decimal open, decimal high, decimal low, decimal close, long volume, CancellationToken ct = default);
     Task TrimMarketBarsOlderThanAsync(int keepTradingDaysApprox, CancellationToken ct = default);
     Task<IReadOnlyList<MarketLtpRow>> GetAllLtpAsync(CancellationToken ct = default);
     Task<IReadOnlyList<MarketBarRow>> GetBarsAsync(Guid? instrumentId, int limitDays, CancellationToken ct = default);
     Task<IReadOnlyList<MarketBarRow>> GetBarsForInstrumentAsync(Guid instrumentId, int limitDays, CancellationToken ct = default);
+    Task<IReadOnlyList<MarketIntradayBarRow>> GetIntradayBarsForInstrumentAsync(Guid instrumentId, string interval, int limitBars, CancellationToken ct = default);
+    Task<int> CountIntradayBarsAsync(Guid instrumentId, string interval, CancellationToken ct = default);
     Task LogQuoteFetchBatchAsync(string mode, int requested, int fetched, int unfetched, bool statusOk, string? message, string? errorCode, string exchangeTokensJson, string unfetchedJson, Guid? analysisRunId, int? durationMs, CancellationToken ct = default);
 }
 
@@ -102,6 +114,12 @@ public interface IPortfolioRepository
     Task CompleteAnalysisRunAsync(Guid runId, string status, string? error, object stats, CancellationToken ct = default);
     Task InsertSignalAsync(AnalysisSignalRow signal, CancellationToken ct = default);
     Task<AnalysisSignalRow?> GetSignalAsync(Guid signalId, Guid userId, CancellationToken ct = default);
+    Task<Guid> CreateLiquidityAnalysisRunAsync(Guid userId, string triggeredBy, bool nifty50, bool nifty100, bool watchlist, DateOnly asOfDate, CancellationToken ct = default);
+    Task CompleteLiquidityAnalysisRunAsync(Guid runId, string status, string? error, object stats, CancellationToken ct = default);
+    Task InsertLiquiditySignalAsync(LiquiditySignalRow signal, CancellationToken ct = default);
+    Task<IReadOnlyList<LiquiditySignalRow>> GetLiquiditySignalsAsync(Guid userId, Guid? runId, CancellationToken ct = default);
+    Task<LiquiditySignalRow?> GetLiquiditySignalAsync(Guid signalId, Guid userId, CancellationToken ct = default);
+    Task<Guid> OpenPositionFromLiquiditySignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default);
     Task<Guid> OpenPositionFromSignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default);
     Task UpdateStopLossAsync(Guid userId, Guid positionId, decimal newStop, CancellationToken ct = default);
     Task ClosePositionAsync(Guid userId, Guid positionId, decimal exitPrice, string closeReason, CancellationToken ct = default);

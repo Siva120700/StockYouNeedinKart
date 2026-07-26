@@ -9,8 +9,10 @@ public static class DependencyInjection
     {
         services.AddScoped<TokenSyncService>();
         services.AddScoped<MarketBarsSyncService>();
+        services.AddScoped<IntradayBarsSyncService>();
         services.AddScoped<LtpPollService>();
         services.AddScoped<AnalysisRunService>();
+        services.AddScoped<LiquidityAnalysisService>();
         services.AddScoped<UniverseSeedService>();
         return services;
     }

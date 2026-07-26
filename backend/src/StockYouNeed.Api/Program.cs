@@ -26,7 +26,12 @@ builder.Services
     .AddGraphQLServer()
     .AddQueryType<Query>()
     .AddMutationType<Mutation>()
-    .ModifyRequestOptions(o => o.IncludeExceptionDetails = builder.Environment.IsDevelopment());
+    .ModifyRequestOptions(o =>
+    {
+        o.IncludeExceptionDetails = builder.Environment.IsDevelopment();
+        // Liquidity run syncs 1H bars for the full universe (Angel-paced) — far beyond 30s default.
+        o.ExecutionTimeout = TimeSpan.FromMinutes(15);
+    });
 
 var app = builder.Build();
 

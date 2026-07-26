@@ -36,6 +36,13 @@ public sealed class Query
         CancellationToken ct)
         => await portfolio.GetSignalsAsync(user.UserId, runId, ct);
 
+    public async Task<IReadOnlyList<LiquiditySignalRow>> LiquiditySignals(
+        Guid? runId,
+        [Service] ICurrentUserAccessor user,
+        [Service] IPortfolioRepository portfolio,
+        CancellationToken ct)
+        => await portfolio.GetLiquiditySignalsAsync(user.UserId, runId, ct);
+
     public async Task<IReadOnlyList<OpenPositionRow>> OpenPositions(
         [Service] ICurrentUserAccessor user,
         [Service] IPortfolioRepository portfolio,
@@ -71,6 +78,21 @@ public sealed class Mutation
             includeSectorCheck,
             ct);
 
+    public async Task<AnalysisRunRow> RunLiquidityAnalysis(
+        bool includeNifty50,
+        bool includeNifty100,
+        bool includeWatchlist,
+        [Service] ICurrentUserAccessor user,
+        [Service] LiquidityAnalysisService analysis,
+        CancellationToken ct)
+        => await analysis.RunAsync(
+            user.UserId,
+            includeNifty50,
+            includeNifty100,
+            includeWatchlist,
+            "manual",
+            ct);
+
     public async Task<bool> AddToWatchlist(
         Guid instrumentId,
         [Service] ICurrentUserAccessor user,
@@ -98,6 +120,15 @@ public sealed class Mutation
         [Service] IPortfolioRepository portfolio,
         CancellationToken ct)
         => await portfolio.OpenPositionFromSignalAsync(
+            user.UserId, signalId, quantityLots <= 0 ? 1 : quantityLots, ct);
+
+    public async Task<Guid> OpenPositionFromLiquiditySignal(
+        Guid signalId,
+        int quantityLots,
+        [Service] ICurrentUserAccessor user,
+        [Service] IPortfolioRepository portfolio,
+        CancellationToken ct)
+        => await portfolio.OpenPositionFromLiquiditySignalAsync(
             user.UserId, signalId, quantityLots <= 0 ? 1 : quantityLots, ct);
 
     public async Task<bool> UpdateStopLoss(

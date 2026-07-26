@@ -24,6 +24,31 @@ export type Signal = {
   freshCross: boolean;
 };
 
+export type LiquiditySignal = {
+  id: string;
+  liquidityRunId: string;
+  instrumentId: string;
+  appSymbol: string;
+  instrumentName: string;
+  side: string;
+  entryPrice: number;
+  initialStopLoss: number;
+  targetT1?: number | null;
+  targetT2?: number | null;
+  targetT3?: number | null;
+  relativeVolume: number;
+  rvolPercentile: number;
+  rvolOk: boolean;
+  strongClose: boolean;
+  sweepSide?: string | null;
+  sweptZoneType?: string | null;
+  sweptZonePrice?: number | null;
+  nearestZoneType?: string | null;
+  nearestZonePrice?: number | null;
+  distancePct?: number | null;
+  timeframeContext: string;
+};
+
 export type OpenPosition = {
   id: string;
   symbol: string;

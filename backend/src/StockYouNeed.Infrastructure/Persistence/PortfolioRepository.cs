@@ -351,6 +351,191 @@ public sealed class PortfolioRepository : IPortfolioRepository
         return rows.ToList();
     }
 
+    public async Task<Guid> CreateLiquidityAnalysisRunAsync(
+        Guid userId, string triggeredBy, bool nifty50, bool nifty100, bool watchlist, DateOnly asOfDate,
+        CancellationToken ct = default)
+    {
+        const string sql = """
+            INSERT INTO liquidity_analysis_runs (
+              user_id, triggered_by, include_nifty50, include_nifty100, include_watchlist, as_of_date, status)
+            VALUES (
+              @userId, @triggeredBy, @nifty50, @nifty100, @watchlist, @asOfDate, 'running')
+            RETURNING id
+            """;
+        using var conn = _db.CreateConnection();
+        await SetUserAsync(conn, userId);
+        return await conn.ExecuteScalarAsync<Guid>(new CommandDefinition(sql, new
+        {
+            userId, triggeredBy, nifty50, nifty100, watchlist, asOfDate
+        }, cancellationToken: ct));
+    }
+
+    public async Task CompleteLiquidityAnalysisRunAsync(Guid runId, string status, string? error, object stats, CancellationToken ct = default)
+    {
+        const string sql = """
+            UPDATE liquidity_analysis_runs
+            SET finished_at = now(), status = @status, error_message = @error, stats = @stats::jsonb
+            WHERE id = @runId
+            """;
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(new CommandDefinition(sql, new
+        {
+            runId, status, error, stats = JsonSerializer.Serialize(stats)
+        }, cancellationToken: ct));
+    }
+
+    public async Task InsertLiquiditySignalAsync(LiquiditySignalRow signal, CancellationToken ct = default)
+    {
+        const string sql = """
+            INSERT INTO liquidity_signals (
+              id, liquidity_run_id, user_id, instrument_id, side, as_of_date,
+              entry_price, initial_stop_loss, target_t1, target_t2, target_t3,
+              relative_volume, rvol_percentile, rvol_ok, strong_close,
+              sweep_side, swept_zone_type, swept_zone_price,
+              nearest_zone_type, nearest_zone_price, distance_pct,
+              zone_tags, timeframe_context)
+            VALUES (
+              @Id, @LiquidityRunId, @UserId, @InstrumentId, @Side::signal_side, @AsOfDate,
+              @EntryPrice, @InitialStopLoss, @TargetT1, @TargetT2, @TargetT3,
+              @RelativeVolume, @RvolPercentile, @RvolOk, @StrongClose,
+              @SweepSide, @SweptZoneType, @SweptZonePrice,
+              @NearestZoneType, @NearestZonePrice, @DistancePct,
+              @ZoneTags, @TimeframeContext)
+            """;
+        using var conn = _db.CreateConnection();
+        await SetUserAsync(conn, signal.UserId);
+        await conn.ExecuteAsync(new CommandDefinition(sql, signal, cancellationToken: ct));
+    }
+
+    public async Task<IReadOnlyList<LiquiditySignalRow>> GetLiquiditySignalsAsync(Guid userId, Guid? runId, CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT
+              s.id AS Id,
+              s.liquidity_run_id AS LiquidityRunId,
+              s.user_id AS UserId,
+              s.instrument_id AS InstrumentId,
+              i.symbol AS AppSymbol,
+              i.name AS InstrumentName,
+              s.side::text AS Side,
+              s.as_of_date AS AsOfDate,
+              s.entry_price AS EntryPrice,
+              s.initial_stop_loss AS InitialStopLoss,
+              s.target_t1 AS TargetT1,
+              s.target_t2 AS TargetT2,
+              s.target_t3 AS TargetT3,
+              s.relative_volume AS RelativeVolume,
+              s.rvol_percentile AS RvolPercentile,
+              s.rvol_ok AS RvolOk,
+              s.strong_close AS StrongClose,
+              s.sweep_side AS SweepSide,
+              s.swept_zone_type AS SweptZoneType,
+              s.swept_zone_price AS SweptZonePrice,
+              s.nearest_zone_type AS NearestZoneType,
+              s.nearest_zone_price AS NearestZonePrice,
+              s.distance_pct AS DistancePct,
+              s.zone_tags AS ZoneTags,
+              s.timeframe_context AS TimeframeContext
+            FROM liquidity_signals s
+            JOIN instruments i ON i.id = s.instrument_id
+            WHERE s.user_id = @userId
+              AND (
+                (@runId IS NOT NULL AND s.liquidity_run_id = @runId)
+                OR (
+                  @runId IS NULL
+                  AND s.liquidity_run_id = (
+                    SELECT r.id FROM liquidity_analysis_runs r
+                    WHERE r.user_id = @userId AND r.status = 'succeeded'
+                    ORDER BY r.started_at DESC
+                    LIMIT 1
+                  )
+                )
+              )
+            ORDER BY s.created_at DESC
+            LIMIT 500
+            """;
+        using var conn = _db.CreateConnection();
+        await SetUserAsync(conn, userId);
+        var rows = await conn.QueryAsync<LiquiditySignalRow>(
+            new CommandDefinition(sql, new { userId, runId }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    public async Task<LiquiditySignalRow?> GetLiquiditySignalAsync(Guid signalId, Guid userId, CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT
+              s.id AS Id,
+              s.liquidity_run_id AS LiquidityRunId,
+              s.user_id AS UserId,
+              s.instrument_id AS InstrumentId,
+              i.symbol AS AppSymbol,
+              i.name AS InstrumentName,
+              s.side::text AS Side,
+              s.as_of_date AS AsOfDate,
+              s.entry_price AS EntryPrice,
+              s.initial_stop_loss AS InitialStopLoss,
+              s.target_t1 AS TargetT1,
+              s.target_t2 AS TargetT2,
+              s.target_t3 AS TargetT3,
+              s.relative_volume AS RelativeVolume,
+              s.rvol_percentile AS RvolPercentile,
+              s.rvol_ok AS RvolOk,
+              s.strong_close AS StrongClose,
+              s.sweep_side AS SweepSide,
+              s.swept_zone_type AS SweptZoneType,
+              s.swept_zone_price AS SweptZonePrice,
+              s.nearest_zone_type AS NearestZoneType,
+              s.nearest_zone_price AS NearestZonePrice,
+              s.distance_pct AS DistancePct,
+              s.zone_tags AS ZoneTags,
+              s.timeframe_context AS TimeframeContext
+            FROM liquidity_signals s
+            JOIN instruments i ON i.id = s.instrument_id
+            WHERE s.id = @signalId AND s.user_id = @userId
+            """;
+        using var conn = _db.CreateConnection();
+        await SetUserAsync(conn, userId);
+        return await conn.QuerySingleOrDefaultAsync<LiquiditySignalRow>(
+            new CommandDefinition(sql, new { signalId, userId }, cancellationToken: ct));
+    }
+
+    public async Task<Guid> OpenPositionFromLiquiditySignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default)
+    {
+        var signal = await GetLiquiditySignalAsync(signalId, userId, ct)
+                     ?? throw new InvalidOperationException("Liquidity signal not found.");
+
+        const string sql = """
+            INSERT INTO positions (
+              user_id, instrument_id, signal_id, liquidity_signal_id, side, status,
+              quantity_lots, lot_size, quantity_units,
+              entry_price, entry_as_of_date, current_stop_loss,
+              target_t1, target_t2, target_t3, last_price)
+            VALUES (
+              @userId, @instrumentId, NULL, @signalId, @side::signal_side, 'open',
+              @quantityLots, 1, @quantityLots,
+              @entry, @asOf, @sl,
+              @t1, @t2, @t3, @entry)
+            RETURNING id
+            """;
+        using var conn = _db.CreateConnection();
+        await SetUserAsync(conn, userId);
+        return await conn.ExecuteScalarAsync<Guid>(new CommandDefinition(sql, new
+        {
+            userId,
+            instrumentId = signal.InstrumentId,
+            signalId,
+            side = signal.Side,
+            quantityLots,
+            entry = signal.EntryPrice,
+            asOf = signal.AsOfDate,
+            sl = signal.InitialStopLoss,
+            t1 = signal.TargetT1,
+            t2 = signal.TargetT2,
+            t3 = signal.TargetT3
+        }, cancellationToken: ct));
+    }
+
     private static async Task SetUserAsync(System.Data.IDbConnection conn, Guid userId)
     {
         await conn.ExecuteAsync("SELECT set_config('app.current_user_id', @id, true)", new { id = userId.ToString() });

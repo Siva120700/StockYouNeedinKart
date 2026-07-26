@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import {
   ChartLine,
+  Drop,
   ListChecks,
   Pulse,
   SidebarSimple,
@@ -21,6 +22,7 @@ import { DEFAULT_ICON_SIZE } from "../../constants";
 const navItems = [
   { to: "/ltp", label: "Live LTP", icon: Pulse },
   { to: "/signals", label: "Signals", icon: ChartLine },
+  { to: "/liquidity", label: "Liquidity", icon: Drop },
   { to: "/positions", label: "Positions", icon: ListChecks },
 ];
 
