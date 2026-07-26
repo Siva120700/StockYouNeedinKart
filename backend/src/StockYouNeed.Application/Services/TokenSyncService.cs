@@ -8,6 +8,14 @@ namespace StockYouNeed.Application.Services;
 
 public sealed class TokenSyncService
 {
+    /// <summary>App symbol → Angel NSE equity root (before -EQ) when renamed/demerged.</summary>
+    private static readonly Dictionary<string, string> EquitySymbolAliases =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["LTIM"] = "LTM",
+            ["TATAMOTORS"] = "TMPV", // renamed; CV lists separately as TMCV
+        };
+
     private readonly IAngelMarketDataClient _angel;
     private readonly IInstrumentRepository _instruments;
     private readonly AngelOptions _options;
@@ -41,15 +49,16 @@ public sealed class TokenSyncService
         }
 
         var scrips = await _angel.DownloadScripMasterAsync(ct);
-        var nseEquity = new Dictionary<string, AngelScrip>(StringComparer.OrdinalIgnoreCase);
+        // Prefer lookup by trading root (RELIANCE from RELIANCE-EQ) — Angel Name is often the company name.
+        var byTradingRoot = new Dictionary<string, AngelScrip>(StringComparer.OrdinalIgnoreCase);
         var nseIndex = new List<AngelScrip>();
         foreach (var s in scrips.Where(s => s.ExchSeg.Equals("NSE", StringComparison.OrdinalIgnoreCase)))
         {
             if (s.Symbol.EndsWith("-EQ", StringComparison.OrdinalIgnoreCase))
             {
-                var key = s.Name.Trim().ToUpperInvariant();
-                if (!nseEquity.ContainsKey(key))
-                    nseEquity[key] = s;
+                var root = s.Symbol[..^3]; // strip -EQ
+                if (!string.IsNullOrWhiteSpace(root) && !byTradingRoot.ContainsKey(root))
+                    byTradingRoot[root] = s;
             }
             else if (s.InstrumentType.Equals("AMXIDX", StringComparison.OrdinalIgnoreCase)
                      || s.Name.Contains("Nifty", StringComparison.OrdinalIgnoreCase))
@@ -61,18 +70,42 @@ public sealed class TokenSyncService
         var matched = 0;
         foreach (var equity in equities)
         {
-            var key = equity.Symbol.Trim().ToUpperInvariant();
-            if (!nseEquity.TryGetValue(key, out var scrip))
+            var appKey = equity.Symbol.Trim().ToUpperInvariant();
+            var lookupKeys = new List<string> { appKey };
+            if (EquitySymbolAliases.TryGetValue(appKey, out var alias))
+                lookupKeys.Add(alias.ToUpperInvariant());
+
+            AngelScrip? scrip = null;
+            string? matchedAs = null;
+            foreach (var key in lookupKeys)
             {
+                if (byTradingRoot.TryGetValue(key, out scrip))
+                {
+                    matchedAs = key;
+                    break;
+                }
+
                 scrip = scrips.FirstOrDefault(s =>
                     s.ExchSeg.Equals("NSE", StringComparison.OrdinalIgnoreCase)
                     && s.Symbol.StartsWith(key + "-", StringComparison.OrdinalIgnoreCase));
+                if (scrip is not null)
+                {
+                    matchedAs = key;
+                    break;
+                }
             }
 
             if (scrip is null)
             {
                 _logger.LogWarning("No Angel NSE token for {Symbol}", equity.Symbol);
                 continue;
+            }
+
+            if (matchedAs is not null && !matchedAs.Equals(appKey, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation(
+                    "Token alias {AppSymbol} → Angel {Trading} ({Token})",
+                    equity.Symbol, scrip.Symbol, scrip.Token);
             }
 
             await _instruments.UpsertAngelTokenAsync(new AngelTokenRow
@@ -94,7 +127,6 @@ public sealed class TokenSyncService
             if (!UniverseSeedService.SectorAngelNameHints.TryGetValue(sector.Symbol, out var hint))
                 hint = sector.Name;
 
-            // Exact name match first, then shortest contains (avoids Nifty Bank vs Nifty Private Bank)
             var scrip = nseIndex.FirstOrDefault(s =>
                 s.Name.Equals(hint, StringComparison.OrdinalIgnoreCase)
                 || s.Name.Equals(sector.Name, StringComparison.OrdinalIgnoreCase));

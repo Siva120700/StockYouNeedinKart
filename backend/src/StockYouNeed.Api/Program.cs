@@ -60,6 +60,9 @@ using (var scope = app.Services.CreateScope())
         await instruments.EnsureDemoUserAsync(auth.DemoUserId, auth.DemoEmail, auth.DemoDisplayName);
         var seeder = scope.ServiceProvider.GetRequiredService<UniverseSeedService>();
         await seeder.SeedAsync();
+        // Map new Nifty 100 symbols to Angel tokens (Worker also does this daily).
+        var tokenSync = scope.ServiceProvider.GetRequiredService<TokenSyncService>();
+        await tokenSync.SyncUniverseTokensAsync();
     }
     catch (Exception ex)
     {

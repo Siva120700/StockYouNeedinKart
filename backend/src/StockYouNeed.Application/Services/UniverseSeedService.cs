@@ -5,8 +5,7 @@ using StockYouNeed.Domain;
 namespace StockYouNeed.Application.Services;
 
 /// <summary>
-/// Seeds a starter Nifty 50 set so token sync has something to map.
-/// Expand / replace with official index constituents over time.
+/// Seeds Nifty 50 + Nifty Next 50 (full Nifty 100) so token sync has the equity universe.
 /// </summary>
 public sealed class UniverseSeedService
 {
@@ -36,7 +35,8 @@ public sealed class UniverseSeedService
         ("ULTRACEMCO", "UltraTech Cement"),
         ("NTPC", "NTPC"),
         ("POWERGRID", "Power Grid Corporation"),
-        ("TATAMOTORS", "Tata Motors"),
+        ("TMPV", "Tata Motors Passenger Vehicles"), // demerger: was TATAMOTORS
+        ("TMCV", "Tata Motors Commercial Vehicles"),
         ("TATASTEEL", "Tata Steel"),
         ("ADANIENT", "Adani Enterprises"),
         ("ADANIPORTS", "Adani Ports"),
@@ -62,25 +62,64 @@ public sealed class UniverseSeedService
         ("HEROMOTOCO", "Hero MotoCorp"),
         ("BPCL", "Bharat Petroleum"),
         ("TATACONSUM", "Tata Consumer Products"),
-        ("LTIM", "LTIMindtree"),
+        ("LTM", "LTM Limited"), // formerly LTIM / LTIMindtree
         ("KOTAKBANK", "Kotak Mahindra Bank"),
         ("BEL", "Bharat Electronics"),
         ("TRENT", "Trent")
     ];
 
-    // Extra names often in Nifty 100 beyond Nifty 50 (sample)
+    // Nifty Next 50 (Nifty 100 excluding Nifty 50) — as of Apr 2026.
+    // Symbols already in Nifty50[] are omitted here (they still get nifty_100 membership above).
     private static readonly (string Symbol, string Name)[] Nifty100Extra =
     [
-        ("DMART", "Avenue Supermarts"),
-        ("PIDILITIND", "Pidilite Industries"),
-        ("GODREJCP", "Godrej Consumer Products"),
-        ("HAVELLS", "Havells India"),
-        ("SIEMENS", "Siemens"),
-        ("DLF", "DLF"),
-        ("INDIGO", "InterGlobe Aviation"),
-        ("VEDL", "Vedanta"),
+        ("ABB", "ABB India"),
+        ("ADANIENSOL", "Adani Energy Solutions"),
+        ("ADANIGREEN", "Adani Green Energy"),
+        ("ADANIPOWER", "Adani Power"),
         ("AMBUJACEM", "Ambuja Cements"),
-        ("BANKBARODA", "Bank of Baroda")
+        ("BAJAJHLDNG", "Bajaj Holdings & Investment"),
+        ("BANKBARODA", "Bank of Baroda"),
+        ("BOSCHLTD", "Bosch"),
+        ("CANBK", "Canara Bank"),
+        ("CGPOWER", "CG Power and Industrial Solutions"),
+        ("CHOLAFIN", "Cholamandalam Investment and Finance"),
+        ("CUMMINSIND", "Cummins India"),
+        ("DLF", "DLF"),
+        ("DMART", "Avenue Supermarts"),
+        ("ENRIN", "Siemens Energy India"),
+        ("GAIL", "GAIL India"),
+        ("GODREJCP", "Godrej Consumer Products"),
+        ("HAL", "Hindustan Aeronautics"),
+        ("HDFCAMC", "HDFC Asset Management"),
+        ("HINDZINC", "Hindustan Zinc"),
+        ("HYUNDAI", "Hyundai Motor India"),
+        ("INDHOTEL", "Indian Hotels Company"),
+        ("IOC", "Indian Oil Corporation"),
+        ("IRFC", "Indian Railway Finance Corporation"),
+        ("JINDALSTEL", "Jindal Steel"),
+        ("LODHA", "Macrotech Developers"),
+        ("MAZDOCK", "Mazagon Dock Shipbuilders"),
+        ("MOTHERSON", "Samvardhana Motherson International"),
+        ("MUTHOOTFIN", "Muthoot Finance"),
+        ("PFC", "Power Finance Corporation"),
+        ("PIDILITIND", "Pidilite Industries"),
+        ("PNB", "Punjab National Bank"),
+        ("RECLTD", "REC"),
+        ("SHREECEM", "Shree Cement"),
+        ("SIEMENS", "Siemens"),
+        ("SOLARINDS", "Solar Industries"),
+        ("TATACAP", "Tata Capital"),
+        ("TATAPOWER", "Tata Power"),
+        ("TORNTPHARM", "Torrent Pharmaceuticals"),
+        ("TVSMOTOR", "TVS Motor Company"),
+        ("UNIONBANK", "Union Bank of India"),
+        ("UNITDSPR", "United Spirits"),
+        ("VBL", "Varun Beverages"),
+        ("VEDL", "Vedanta"),
+        ("ZYDUSLIFE", "Zydus Lifesciences"),
+        // Still widely traded large-caps often held with Nifty 100 screens
+        ("HAVELLS", "Havells India"),
+        ("INDIGO", "InterGlobe Aviation"),
     ];
 
     public UniverseSeedService(IInstrumentRepository instruments, ILogger<UniverseSeedService> logger)
@@ -91,6 +130,9 @@ public sealed class UniverseSeedService
 
     public async Task SeedAsync(CancellationToken ct = default)
     {
+        // Old NSE symbols — retire on every seed so we don't need a one-off SQL migration.
+        await _instruments.RetireEquitySymbolsAsync(["LTIM", "TATAMOTORS"], ct);
+
         foreach (var (symbol, name) in Nifty50)
         {
             await _instruments.SeedInstrumentIfMissingAsync(symbol, name, ct);
@@ -134,25 +176,41 @@ public sealed class UniverseSeedService
     {
         ["HDFCBANK"] = "NIFTYBANK", ["ICICIBANK"] = "NIFTYBANK", ["SBIN"] = "NIFTYBANK",
         ["AXISBANK"] = "NIFTYBANK", ["KOTAKBANK"] = "NIFTYBANK", ["INDUSINDBK"] = "NIFTYBANK",
-        ["BANKBARODA"] = "NIFTYPSUBANK",
+        ["BANKBARODA"] = "NIFTYPSUBANK", ["CANBK"] = "NIFTYPSUBANK", ["PNB"] = "NIFTYPSUBANK",
+        ["UNIONBANK"] = "NIFTYPSUBANK",
         ["TCS"] = "NIFTYIT", ["INFY"] = "NIFTYIT", ["HCLTECH"] = "NIFTYIT", ["WIPRO"] = "NIFTYIT",
-        ["TECHM"] = "NIFTYIT", ["LTIM"] = "NIFTYIT",
+        ["TECHM"] = "NIFTYIT", ["LTM"] = "NIFTYIT",
         ["SUNPHARMA"] = "NIFTYPHARMA", ["CIPLA"] = "NIFTYPHARMA", ["DRREDDY"] = "NIFTYPHARMA",
-        ["DIVISLAB"] = "NIFTYPHARMA", ["APOLLOHOSP"] = "NIFTYHEALTHCARE",
+        ["DIVISLAB"] = "NIFTYPHARMA", ["TORNTPHARM"] = "NIFTYPHARMA", ["ZYDUSLIFE"] = "NIFTYPHARMA",
+        ["APOLLOHOSP"] = "NIFTYHEALTHCARE",
         ["HINDUNILVR"] = "NIFTYFMCG", ["ITC"] = "NIFTYFMCG", ["NESTLEIND"] = "NIFTYFMCG",
         ["BRITANNIA"] = "NIFTYFMCG", ["TATACONSUM"] = "NIFTYFMCG", ["GODREJCP"] = "NIFTYFMCG",
-        ["MARUTI"] = "NIFTYAUTO", ["TATAMOTORS"] = "NIFTYAUTO", ["M&M"] = "NIFTYAUTO",
-        ["EICHERMOT"] = "NIFTYAUTO", ["HEROMOTOCO"] = "NIFTYAUTO",
-        ["TATASTEEL"] = "NIFTYMETAL", ["JSWSTEEL"] = "NIFTYMETAL", ["HINDALCO"] = "NIFTYMETAL", ["VEDL"] = "NIFTYMETAL",
+        ["UNITDSPR"] = "NIFTYFMCG", ["VBL"] = "NIFTYFMCG",
+        ["MARUTI"] = "NIFTYAUTO", ["TMPV"] = "NIFTYAUTO", ["TMCV"] = "NIFTYAUTO", ["M&M"] = "NIFTYAUTO",
+        ["EICHERMOT"] = "NIFTYAUTO", ["HEROMOTOCO"] = "NIFTYAUTO", ["TVSMOTOR"] = "NIFTYAUTO",
+        ["BOSCHLTD"] = "NIFTYAUTO", ["MOTHERSON"] = "NIFTYAUTO", ["HYUNDAI"] = "NIFTYAUTO",
+        ["TATASTEEL"] = "NIFTYMETAL", ["JSWSTEEL"] = "NIFTYMETAL", ["HINDALCO"] = "NIFTYMETAL",
+        ["VEDL"] = "NIFTYMETAL", ["JINDALSTEL"] = "NIFTYMETAL", ["HINDZINC"] = "NIFTYMETAL",
         ["RELIANCE"] = "NIFTYENERGY", ["ONGC"] = "NIFTYENERGY", ["NTPC"] = "NIFTYENERGY",
         ["POWERGRID"] = "NIFTYENERGY", ["BPCL"] = "NIFTYENERGY", ["COALINDIA"] = "NIFTYENERGY",
-        ["DLF"] = "NIFTYREALTY",
+        ["IOC"] = "NIFTYENERGY", ["GAIL"] = "NIFTYENERGY", ["TATAPOWER"] = "NIFTYENERGY",
+        ["ADANIGREEN"] = "NIFTYENERGY", ["ADANIPOWER"] = "NIFTYENERGY", ["ADANIENSOL"] = "NIFTYENERGY",
+        ["DLF"] = "NIFTYREALTY", ["LODHA"] = "NIFTYREALTY",
         ["BAJFINANCE"] = "NIFTYFINSERVICE", ["BAJAJFINSV"] = "NIFTYFINSERVICE",
         ["SBILIFE"] = "NIFTYFINSERVICE", ["HDFCLIFE"] = "NIFTYFINSERVICE",
-        ["LT"] = "NIFTYINFRA", ["ADANIPORTS"] = "NIFTYINFRA", ["ADANIENT"] = "NIFTYINFRA", ["SIEMENS"] = "NIFTYINFRA",
+        ["CHOLAFIN"] = "NIFTYFINSERVICE", ["BAJAJHLDNG"] = "NIFTYFINSERVICE",
+        ["HDFCAMC"] = "NIFTYFINSERVICE", ["MUTHOOTFIN"] = "NIFTYFINSERVICE",
+        ["PFC"] = "NIFTYFINSERVICE", ["RECLTD"] = "NIFTYFINSERVICE", ["IRFC"] = "NIFTYFINSERVICE",
+        ["TATACAP"] = "NIFTYFINSERVICE",
+        ["LT"] = "NIFTYINFRA", ["ADANIPORTS"] = "NIFTYINFRA", ["ADANIENT"] = "NIFTYINFRA",
+        ["SIEMENS"] = "NIFTYINFRA", ["ABB"] = "NIFTYINFRA", ["CGPOWER"] = "NIFTYINFRA",
+        ["CUMMINSIND"] = "NIFTYINFRA", ["ENRIN"] = "NIFTYINFRA", ["HAL"] = "NIFTYINFRA",
+        ["MAZDOCK"] = "NIFTYINFRA",
         ["ULTRACEMCO"] = "NIFTYINFRA", ["AMBUJACEM"] = "NIFTYINFRA", ["GRASIM"] = "NIFTYINFRA",
+        ["SHREECEM"] = "NIFTYINFRA",
         ["ASIANPAINT"] = "NIFTYCONSUMER", ["TITAN"] = "NIFTYCONSUMER", ["HAVELLS"] = "NIFTYCONSUMER",
         ["PIDILITIND"] = "NIFTYCONSUMER", ["DMART"] = "NIFTYCONSUMER", ["TRENT"] = "NIFTYCONSUMER",
+        ["INDHOTEL"] = "NIFTYCONSUMER", ["SOLARINDS"] = "NIFTYCONSUMER",
         ["BHARTIARTL"] = "NIFTYMEDIA", ["INDIGO"] = "NIFTYINFRA", ["BEL"] = "NIFTYINFRA",
     };
 

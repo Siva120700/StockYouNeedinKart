@@ -121,6 +121,30 @@ public sealed class InstrumentRepository : IInstrumentRepository
         await conn.ExecuteAsync(new CommandDefinition(sql, new { universe, symbol }, cancellationToken: ct));
     }
 
+    public async Task RetireEquitySymbolsAsync(IReadOnlyList<string> symbols, CancellationToken ct = default)
+    {
+        if (symbols.Count == 0)
+            return;
+
+        const string sql = """
+            UPDATE instruments
+            SET is_active = false, updated_at = now()
+            WHERE kind = 'equity'
+              AND exchange = 'NSE'
+              AND symbol = ANY(@symbols);
+
+            UPDATE universe_memberships um
+            SET valid_to = CURRENT_DATE
+            WHERE um.valid_to IS NULL
+              AND um.instrument_id IN (
+                SELECT i.id FROM instruments i
+                WHERE i.kind = 'equity' AND i.exchange = 'NSE' AND i.symbol = ANY(@symbols)
+              );
+            """;
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(new CommandDefinition(sql, new { symbols = symbols.ToArray() }, cancellationToken: ct));
+    }
+
     public async Task SeedSectorIndexIfMissingAsync(string symbol, string name, CancellationToken ct = default)
     {
         const string sql = """
