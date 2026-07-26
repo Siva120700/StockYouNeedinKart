@@ -1,12 +1,79 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, FormControlLabel, Switch, Stack as MuiStack } from "@mui/material";
-import { Play, ArrowSquareOut } from "@phosphor-icons/react";
+import { Play, ArrowSquareOut, FilePdf, FileXls } from "@phosphor-icons/react";
 import { ActionFactory, DataFactory } from "../api/factories";
 import type { LiquiditySignal } from "../api/types";
 import { columnFactories } from "../zen_components/table/columnFactories";
 import ZenTable from "../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../constants";
+import {
+  downloadExcelTable,
+  downloadPdfTable,
+  exportStamp,
+  type ExportColumn,
+} from "../utils/exportTable";
+
+type ScoredLiquiditySignal = LiquiditySignal & { score: number };
+
+function formatTarget(row: LiquiditySignal, target: number | null | undefined) {
+  if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice) return "";
+  const t = Number(target);
+  const entry = Number(row.entryPrice);
+  if (entry === 0) return t.toFixed(2);
+  const pct =
+    row.side === "sell" ? ((entry - t) / entry) * 100 : ((t - entry) / entry) * 100;
+  return `${t.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+}
+
+function formatSl(row: LiquiditySignal) {
+  const sl = row.initialStopLoss;
+  if (sl == null || !Number.isFinite(Number(sl)) || !row.entryPrice) return "";
+  const s = Number(sl);
+  const entry = Number(row.entryPrice);
+  if (entry === 0) return s.toFixed(2);
+  const pct = ((s - entry) / entry) * 100;
+  return `${s.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+}
+
+const liquidityExportColumns: ExportColumn<ScoredLiquiditySignal>[] = [
+  { header: "Score", value: (r) => r.score },
+  { header: "Symbol", value: (r) => r.appSymbol },
+  { header: "Side", value: (r) => (r.side === "sell" ? "SELL" : "BUY") },
+  { header: "Entry", value: (r) => r.entryPrice },
+  { header: "SL", value: (r) => formatSl(r) },
+  { header: "T1", value: (r) => formatTarget(r, r.targetT1) },
+  { header: "T2", value: (r) => formatTarget(r, r.targetT2) },
+  { header: "T3", value: (r) => formatTarget(r, r.targetT3) },
+  {
+    header: "RVOL",
+    value: (r) =>
+      `${Number(r.relativeVolume).toFixed(2)} (${Math.round(Number(r.rvolPercentile) * 100)}%)`,
+  },
+  {
+    header: "Sweep",
+    value: (r) =>
+      r.sweptZoneType
+        ? `${r.sweptZoneType}${r.sweptZonePrice != null ? ` @ ${Number(r.sweptZonePrice).toFixed(1)}` : ""}`
+        : "",
+  },
+  {
+    header: "Near zone",
+    value: (r) => {
+      if (!r.nearestZoneType) return "";
+      const dist =
+        r.distancePct != null ? ` ${(Number(r.distancePct) * 100).toFixed(2)}%` : "";
+      return `${r.nearestZoneType}${dist}`;
+    },
+  },
+  { header: "Strong", value: (r) => (r.strongClose ? "Yes" : "No") },
+];
 
 export default function LiquiditySignalsPage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
@@ -105,8 +172,6 @@ export default function LiquiditySignalsPage() {
     return Math.round(Math.min(100, Math.max(0, score)));
   }
 
-  type ScoredLiquiditySignal = LiquiditySignal & { score: number };
-
   const visibleRows = useMemo(() => {
     let list: ScoredLiquiditySignal[] = rows.map((r) => ({
       ...r,
@@ -121,6 +186,24 @@ export default function LiquiditySignalsPage() {
     return list.sort((a, b) => b.score - a.score);
   }, [rows, riskRewardCheck]);
 
+  function onExportPdf() {
+    downloadPdfTable({
+      title: "Liquidity Signals",
+      fileName: exportStamp("liquidity", "pdf"),
+      columns: liquidityExportColumns,
+      rows: visibleRows,
+    });
+  }
+
+  function onExportExcel() {
+    downloadExcelTable({
+      sheetName: "Liquidity",
+      fileName: exportStamp("liquidity", "xlsx"),
+      columns: liquidityExportColumns,
+      rows: visibleRows,
+    });
+  }
+
   useEffect(() => {
     setTitle("Liquidity");
     setBreadcrumbs([{ label: "Home" }, { label: "Liquidity" }]);
@@ -130,6 +213,7 @@ export default function LiquiditySignalsPage() {
   }, []);
 
   useEffect(() => {
+    const exportDisabled = loading || visibleRows.length === 0;
     setPageActions(
       <MuiStack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
         <FormControlLabel
@@ -144,6 +228,24 @@ export default function LiquiditySignalsPage() {
           sx={{ mr: 1 }}
         />
         <Button
+          variant="outlined"
+          size="small"
+          disabled={exportDisabled}
+          startIcon={<FileXls size={DEFAULT_SMALL_ICON_SIZE} />}
+          onClick={onExportExcel}
+        >
+          Excel
+        </Button>
+        <Button
+          variant="outlined"
+          size="small"
+          disabled={exportDisabled}
+          startIcon={<FilePdf size={DEFAULT_SMALL_ICON_SIZE} />}
+          onClick={onExportPdf}
+        >
+          PDF
+        </Button>
+        <Button
           variant="contained"
           size="small"
           disabled={running}
@@ -155,35 +257,9 @@ export default function LiquiditySignalsPage() {
       </MuiStack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, riskRewardCheck, visibleRows.length]);
+  }, [running, loading, riskRewardCheck, visibleRows]);
 
   const columns = useMemo(() => {
-    const formatTarget = (row: LiquiditySignal, target: number | null | undefined) => {
-      if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice) return "";
-      const t = Number(target);
-      const entry = Number(row.entryPrice);
-      if (entry === 0) return t.toFixed(2);
-      const pct =
-        row.side === "sell" ? ((entry - t) / entry) * 100 : ((t - entry) / entry) * 100;
-      return `${t.toLocaleString("en-IN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
-    };
-
-    const formatSl = (row: LiquiditySignal) => {
-      const sl = row.initialStopLoss;
-      if (sl == null || !Number.isFinite(Number(sl)) || !row.entryPrice) return "";
-      const s = Number(sl);
-      const entry = Number(row.entryPrice);
-      if (entry === 0) return s.toFixed(2);
-      const pct = ((s - entry) / entry) * 100;
-      return `${s.toLocaleString("en-IN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
-    };
-
     type Scored = LiquiditySignal & { score: number };
 
     return [

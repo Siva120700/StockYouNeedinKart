@@ -1,12 +1,55 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, FormControlLabel, Switch, Stack as MuiStack } from "@mui/material";
-import { Play, ArrowSquareOut } from "@phosphor-icons/react";
+import { Play, ArrowSquareOut, FilePdf, FileXls } from "@phosphor-icons/react";
 import { ActionFactory, DataFactory } from "../api/factories";
 import type { Signal } from "../api/types";
 import { columnFactories } from "../zen_components/table/columnFactories";
 import ZenTable from "../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../constants";
+import {
+  downloadExcelTable,
+  downloadPdfTable,
+  exportStamp,
+  type ExportColumn,
+} from "../utils/exportTable";
+
+function formatTarget(row: Signal, target: number | null | undefined) {
+  if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice) return "";
+  const t = Number(target);
+  const entry = Number(row.entryPrice);
+  if (entry === 0) return t.toFixed(2);
+  const pct =
+    row.side === "sell" ? ((entry - t) / entry) * 100 : ((t - entry) / entry) * 100;
+  return `${t.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+}
+
+function formatSl(row: Signal) {
+  const sl = row.initialStopLoss;
+  if (sl == null || !Number.isFinite(Number(sl)) || !row.entryPrice) return "";
+  const s = Number(sl);
+  const entry = Number(row.entryPrice);
+  if (entry === 0) return s.toFixed(2);
+  const pct = ((s - entry) / entry) * 100;
+  return `${s.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+}
+
+const signalExportColumns: ExportColumn<Signal>[] = [
+  { header: "Symbol", value: (r) => r.appSymbol },
+  { header: "Side", value: (r) => (r.side === "sell" ? "SELL" : "BUY") },
+  { header: "Entry", value: (r) => r.entryPrice },
+  { header: "SL", value: (r) => formatSl(r) },
+  { header: "T1", value: (r) => formatTarget(r, r.targetT1) },
+  { header: "T2", value: (r) => formatTarget(r, r.targetT2) },
+  { header: "T3", value: (r) => formatTarget(r, r.targetT3) },
+  { header: "Vol OK", value: (r) => (r.volumeOk ? "Yes" : "No") },
+];
 
 export default function SignalsPage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
@@ -88,7 +131,26 @@ export default function SignalsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function onExportPdf() {
+    downloadPdfTable({
+      title: "Breakout Signals",
+      fileName: exportStamp("signals", "pdf"),
+      columns: signalExportColumns,
+      rows: visibleRows,
+    });
+  }
+
+  function onExportExcel() {
+    downloadExcelTable({
+      sheetName: "Signals",
+      fileName: exportStamp("signals", "xlsx"),
+      columns: signalExportColumns,
+      rows: visibleRows,
+    });
+  }
+
   useEffect(() => {
+    const exportDisabled = loading || visibleRows.length === 0;
     setPageActions(
       <MuiStack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
         <FormControlLabel
@@ -125,6 +187,24 @@ export default function SignalsPage() {
           sx={{ mr: 1 }}
         />
         <Button
+          variant="outlined"
+          size="small"
+          disabled={exportDisabled}
+          startIcon={<FileXls size={DEFAULT_SMALL_ICON_SIZE} />}
+          onClick={onExportExcel}
+        >
+          Excel
+        </Button>
+        <Button
+          variant="outlined"
+          size="small"
+          disabled={exportDisabled}
+          startIcon={<FilePdf size={DEFAULT_SMALL_ICON_SIZE} />}
+          onClick={onExportPdf}
+        >
+          PDF
+        </Button>
+        <Button
           variant="contained"
           size="small"
           disabled={running}
@@ -136,35 +216,9 @@ export default function SignalsPage() {
       </MuiStack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, sectorCheck, riskRewardCheck, freshCrossCheck, visibleRows.length]);
+  }, [running, loading, sectorCheck, riskRewardCheck, freshCrossCheck, visibleRows]);
 
   const columns = useMemo(() => {
-    const formatTarget = (row: Signal, target: number | null | undefined) => {
-      if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice) return "";
-      const t = Number(target);
-      const entry = Number(row.entryPrice);
-      if (entry === 0) return t.toFixed(2);
-      const pct =
-        row.side === "sell" ? ((entry - t) / entry) * 100 : ((t - entry) / entry) * 100;
-      return `${t.toLocaleString("en-IN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
-    };
-
-    const formatSl = (row: Signal) => {
-      const sl = row.initialStopLoss;
-      if (sl == null || !Number.isFinite(Number(sl)) || !row.entryPrice) return "";
-      const s = Number(sl);
-      const entry = Number(row.entryPrice);
-      if (entry === 0) return s.toFixed(2);
-      const pct = ((s - entry) / entry) * 100;
-      return `${s.toLocaleString("en-IN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
-    };
-
     return [
       columnFactories.createTextColumn<Signal>({
         field: "appSymbol",
