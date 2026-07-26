@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Stack as MuiStack } from "@mui/material";
+import { Alert, Button, FormControlLabel, Switch, Stack as MuiStack } from "@mui/material";
 import { Play, ArrowSquareOut } from "@phosphor-icons/react";
 import { ActionFactory, DataFactory } from "../api/factories";
 import type { LiquiditySignal } from "../api/types";
@@ -14,6 +14,7 @@ export default function LiquiditySignalsPage() {
   const [rows, setRows] = useState<LiquiditySignal[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [riskRewardCheck, setRiskRewardCheck] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -51,6 +52,75 @@ export default function LiquiditySignalsPage() {
     }
   }
 
+  /** Risk-reward vs T1: reward/risk. Buy (T1-entry)/(entry-SL); sell (entry-T1)/(SL-entry). */
+  function riskRewardRatio(row: LiquiditySignal): number | null {
+    const entry = Number(row.entryPrice);
+    const sl = Number(row.initialStopLoss);
+    const target = Number(row.targetT1 ?? row.targetT2 ?? row.targetT3);
+    if (![entry, sl, target].every((n) => Number.isFinite(n)) || entry === 0) return null;
+    const risk = row.side === "sell" ? sl - entry : entry - sl;
+    const reward = row.side === "sell" ? entry - target : target - entry;
+    if (risk <= 0 || reward <= 0) return null;
+    return reward / risk;
+  }
+
+  /**
+   * Quality score 0–100: higher = stronger liquidity setup.
+   * Weights: RVOL percentile, RVOL size, sweep zone quality, strong close, R:R, proximity.
+   */
+  function liquidityScore(row: LiquiditySignal): number {
+    let score = 0;
+
+    const pctile = Number(row.rvolPercentile);
+    if (Number.isFinite(pctile)) {
+      score += Math.min(1, Math.max(0, pctile)) * 25; // top of own history
+    }
+
+    const rvol = Number(row.relativeVolume);
+    if (Number.isFinite(rvol) && rvol > 0) {
+      score += Math.min(rvol / 3, 1) * 15; // caps at ~3×
+    }
+
+    const zone = (row.sweptZoneType ?? "").toLowerCase();
+    if (zone.startsWith("equal")) score += 20;
+    else if (zone.startsWith("swing")) score += 15;
+    else if (zone === "pdh" || zone === "pdl") score += 12;
+    else if (zone === "pwh" || zone === "pwl") score += 10;
+    else if (zone === "round") score += 6;
+
+    if (row.strongClose) score += 15;
+
+    const rr = riskRewardRatio(row);
+    if (rr != null) {
+      score += Math.min(rr / 2, 1) * 20; // full points at R:R ≥ 2
+    }
+
+    const dist = Number(row.distancePct);
+    if (Number.isFinite(dist)) {
+      if (dist <= 0.005) score += 5;
+      else if (dist <= 0.01) score += 3;
+      else if (dist <= 0.02) score += 1;
+    }
+
+    return Math.round(Math.min(100, Math.max(0, score)));
+  }
+
+  type ScoredLiquiditySignal = LiquiditySignal & { score: number };
+
+  const visibleRows = useMemo(() => {
+    let list: ScoredLiquiditySignal[] = rows.map((r) => ({
+      ...r,
+      score: liquidityScore(r),
+    }));
+    if (riskRewardCheck) {
+      list = list.filter((r) => {
+        const rr = riskRewardRatio(r);
+        return rr != null && rr >= 1;
+      });
+    }
+    return list.sort((a, b) => b.score - a.score);
+  }, [rows, riskRewardCheck]);
+
   useEffect(() => {
     setTitle("Liquidity");
     setBreadcrumbs([{ label: "Home" }, { label: "Liquidity" }]);
@@ -61,7 +131,18 @@ export default function LiquiditySignalsPage() {
 
   useEffect(() => {
     setPageActions(
-      <MuiStack direction="row" spacing={1} alignItems="center">
+      <MuiStack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={riskRewardCheck}
+              onChange={(e) => setRiskRewardCheck(e.target.checked)}
+            />
+          }
+          label="R:R ≥ 1"
+          sx={{ mr: 1 }}
+        />
         <Button
           variant="contained"
           size="small"
@@ -74,7 +155,7 @@ export default function LiquiditySignalsPage() {
       </MuiStack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running]);
+  }, [running, riskRewardCheck, visibleRows.length]);
 
   const columns = useMemo(() => {
     const formatTarget = (row: LiquiditySignal, target: number | null | undefined) => {
@@ -103,14 +184,23 @@ export default function LiquiditySignalsPage() {
       })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
     };
 
+    type Scored = LiquiditySignal & { score: number };
+
     return [
-      columnFactories.createTextColumn<LiquiditySignal>({
+      columnFactories.createNumberColumn<Scored>({
+        field: "score",
+        headerName: "Score",
+        width: 80,
+        minDecimalPlaces: 0,
+        getValue: (r) => r.score,
+      }),
+      columnFactories.createTextColumn<Scored>({
         field: "appSymbol",
         headerName: "Symbol",
         width: 110,
         getValue: (r) => r.appSymbol,
       }),
-      columnFactories.createStatusColumn<LiquiditySignal>(
+      columnFactories.createStatusColumn<Scored>(
         {
           buy: { label: "BUY", color: "#2e7d32" },
           sell: { label: "SELL", color: "#c62828" },
@@ -122,45 +212,45 @@ export default function LiquiditySignalsPage() {
           getValue: (r) => r.side,
         },
       ),
-      columnFactories.createNumberColumn<LiquiditySignal>({
+      columnFactories.createNumberColumn<Scored>({
         field: "entryPrice",
         headerName: "Entry",
         width: 100,
         minDecimalPlaces: 2,
         getValue: (r) => r.entryPrice,
       }),
-      columnFactories.createTextColumn<LiquiditySignal>({
+      columnFactories.createTextColumn<Scored>({
         field: "initialStopLoss",
         headerName: "SL",
         width: 130,
         getValue: (r) => formatSl(r),
       }),
-      columnFactories.createTextColumn<LiquiditySignal>({
+      columnFactories.createTextColumn<Scored>({
         field: "targetT1",
         headerName: "T1",
         width: 130,
         getValue: (r) => formatTarget(r, r.targetT1),
       }),
-      columnFactories.createTextColumn<LiquiditySignal>({
+      columnFactories.createTextColumn<Scored>({
         field: "targetT2",
         headerName: "T2",
         width: 130,
         getValue: (r) => formatTarget(r, r.targetT2),
       }),
-      columnFactories.createTextColumn<LiquiditySignal>({
+      columnFactories.createTextColumn<Scored>({
         field: "targetT3",
         headerName: "T3",
         width: 130,
         getValue: (r) => formatTarget(r, r.targetT3),
       }),
-      columnFactories.createTextColumn<LiquiditySignal>({
+      columnFactories.createTextColumn<Scored>({
         field: "relativeVolume",
         headerName: "RVOL",
         width: 90,
         getValue: (r) =>
           `${Number(r.relativeVolume).toFixed(2)} (${Math.round(Number(r.rvolPercentile) * 100)}%)`,
       }),
-      columnFactories.createTextColumn<LiquiditySignal>({
+      columnFactories.createTextColumn<Scored>({
         field: "sweptZoneType",
         headerName: "Sweep",
         width: 120,
@@ -169,7 +259,7 @@ export default function LiquiditySignalsPage() {
             ? `${r.sweptZoneType}${r.sweptZonePrice != null ? ` @ ${Number(r.sweptZonePrice).toFixed(1)}` : ""}`
             : "",
       }),
-      columnFactories.createTextColumn<LiquiditySignal>({
+      columnFactories.createTextColumn<Scored>({
         field: "nearestZoneType",
         headerName: "Near zone",
         width: 120,
@@ -180,13 +270,13 @@ export default function LiquiditySignalsPage() {
           return `${r.nearestZoneType}${dist}`;
         },
       }),
-      columnFactories.createBooleanColumn<LiquiditySignal>({
+      columnFactories.createBooleanColumn<Scored>({
         field: "strongClose",
         headerName: "Strong",
         width: 80,
         getValue: (r) => r.strongClose,
       }),
-      columnFactories.createActionColumn<LiquiditySignal>(
+      columnFactories.createActionColumn<Scored>(
         () => [
           {
             icon: <ArrowSquareOut size={DEFAULT_SMALL_ICON_SIZE} />,
@@ -208,10 +298,14 @@ export default function LiquiditySignalsPage() {
       ) : null}
       <ZenTable
         columns={columns}
-        rows={rows}
+        rows={visibleRows}
         getRowId={(r) => r.id}
         loading={loading}
-        emptyMessage="No liquidity signals. Click Run liquidity (needs 1H bars + 4H sweep + 1H confirm)."
+        emptyMessage={
+          riskRewardCheck
+            ? "No liquidity signals match R:R ≥ 1. Turn the filter off, or Run liquidity again."
+            : "No liquidity signals. Click Run liquidity (needs 1H bars + 4H sweep + 1H confirm)."
+        }
       />
     </>
   );
