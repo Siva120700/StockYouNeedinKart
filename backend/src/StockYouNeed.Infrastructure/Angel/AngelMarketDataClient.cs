@@ -16,9 +16,12 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
     private readonly AngelOptions _options;
     private readonly ILogger<AngelMarketDataClient> _logger;
     private readonly SemaphoreSlim _sessionLock = new(1, 1);
+    private readonly SemaphoreSlim _paceLock = new(1, 1);
     private string? _jwt;
     private string? _feedToken;
     private DateTimeOffset _sessionExpiresAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastRequestAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _loginBlockedUntil = DateTimeOffset.MinValue;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -51,6 +54,13 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
             if (!string.IsNullOrEmpty(_jwt) && DateTimeOffset.UtcNow < _sessionExpiresAt)
                 return;
 
+            if (DateTimeOffset.UtcNow < _loginBlockedUntil)
+            {
+                throw new InvalidOperationException(
+                    $"Angel login rate-limited. Retry after {_loginBlockedUntil.ToOffset(TimeSpan.FromHours(5.5)):HH:mm:ss} IST " +
+                    "(SmartAPI blocks repeated logins). Stop/restart only after waiting a few minutes.");
+            }
+
             if (string.IsNullOrWhiteSpace(_options.ClientCode)
                 || string.IsNullOrWhiteSpace(_options.Password)
                 || string.IsNullOrWhiteSpace(_options.ApiKey))
@@ -79,12 +89,22 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
                 totp
             });
 
+            await PaceBeforeRequestAsync(ct);
             var res = await _http.SendAsync(req, ct);
             var body = await res.Content.ReadAsStringAsync(ct);
             if (!res.IsSuccessStatusCode || string.IsNullOrWhiteSpace(body) || body[0] is not ('{' or '['))
             {
+                if (IsRateLimited(res.StatusCode, body))
+                {
+                    var cooldown = Math.Max(1, _options.LoginCooldownMinutes);
+                    _loginBlockedUntil = DateTimeOffset.UtcNow.AddMinutes(cooldown);
+                    throw new InvalidOperationException(
+                        $"Angel login rate-limited (HTTP {(int)res.StatusCode}). " +
+                        $"Wait {cooldown} minutes before retrying. Body: {TrimBody(body)}");
+                }
+
                 throw new InvalidOperationException(
-                    $"Angel login HTTP {(int)res.StatusCode}. Check SmartAPI IP whitelist / credentials. Body: {(body.Length > 180 ? body[..180] : body)}");
+                    $"Angel login HTTP {(int)res.StatusCode}. Check SmartAPI IP whitelist / credentials. Body: {TrimBody(body)}");
             }
 
             using var doc = JsonDocument.Parse(body);
@@ -117,6 +137,7 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
         using var req = CreateSecureRequest(HttpMethod.Post, "rest/secure/angelbroking/market/v1/quote/");
         req.Content = JsonContent.Create(new { mode, exchangeTokens });
 
+        await PaceBeforeRequestAsync(ct);
         var res = await _http.SendAsync(req, ct);
         var body = await res.Content.ReadAsStringAsync(ct);
         if (!res.IsSuccessStatusCode || string.IsNullOrWhiteSpace(body) || body[0] is not ('{' or '['))
@@ -197,6 +218,7 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
             todate = toIst.ToString("yyyy-MM-dd HH:mm")
         });
 
+        await PaceBeforeRequestAsync(ct);
         var res = await _http.SendAsync(req, ct);
         var body = await res.Content.ReadAsStringAsync(ct);
         if (!res.IsSuccessStatusCode || string.IsNullOrWhiteSpace(body) || body[0] is not ('{' or '['))
@@ -279,6 +301,30 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
             req.Headers.TryAddWithoutValidation("X-FeedToken", _feedToken);
         return req;
     }
+
+    private async Task PaceBeforeRequestAsync(CancellationToken ct)
+    {
+        var gap = Math.Max(200, _options.MinRequestIntervalMs);
+        await _paceLock.WaitAsync(ct);
+        try
+        {
+            var waitMs = (int)(_lastRequestAt.AddMilliseconds(gap) - DateTimeOffset.UtcNow).TotalMilliseconds;
+            if (waitMs > 0)
+                await Task.Delay(waitMs, ct);
+            _lastRequestAt = DateTimeOffset.UtcNow;
+        }
+        finally
+        {
+            _paceLock.Release();
+        }
+    }
+
+    private static bool IsRateLimited(System.Net.HttpStatusCode status, string body) =>
+        status == System.Net.HttpStatusCode.Forbidden
+        && body.Contains("rate", StringComparison.OrdinalIgnoreCase);
+
+    private static string TrimBody(string body) =>
+        body.Length > 180 ? body[..180] : body;
 
     private static string GetString(JsonElement el, string name) =>
         el.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() ?? "" : "";

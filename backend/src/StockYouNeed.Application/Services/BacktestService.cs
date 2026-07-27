@@ -14,8 +14,6 @@ public sealed class BacktestService
 {
     private const int DailyTimeStopBars = 20;
     private const int HourlyTimeStopBars = 40;
-    private const int DailyChunkDays = 90;
-    private const int HourlyChunkDays = 20;
 
     private readonly IAngelMarketDataClient _angel;
     private readonly IInstrumentRepository _instruments;
@@ -84,7 +82,8 @@ public sealed class BacktestService
             .ToList();
 
         if (chron.Count < 10)
-            throw new InvalidOperationException($"Not enough daily history ({chron.Count} bars).");
+            throw new InvalidOperationException(
+                $"Not enough daily history ({chron.Count} bars). Angel may be rate-limiting — wait 1–2 minutes and retry with strategy=Signals.");
 
         var bars = chron.Select(c => new MarketBarRow
         {
@@ -166,7 +165,8 @@ public sealed class BacktestService
             .ToList();
 
         if (bars1hChron.Count < 60)
-            throw new InvalidOperationException($"Not enough 1H history ({bars1hChron.Count} bars).");
+            throw new InvalidOperationException(
+                $"Not enough 1H history ({bars1hChron.Count} bars). Angel may be rate-limiting — wait 2 minutes and retry with strategy=Signals.");
 
         var notes = new List<BacktestNoteRow>();
         var runId = Guid.Empty;
@@ -360,47 +360,86 @@ public sealed class BacktestService
 
     private async Task<List<AngelCandle>> FetchDailyChunkedAsync(
         AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct)
-    {
-        await _angel.EnsureSessionAsync(ct);
-        var all = new List<AngelCandle>();
-        var cursor = fromIst;
-        while (cursor < toIst)
-        {
-            ct.ThrowIfCancellationRequested();
-            var chunkEnd = cursor.AddDays(DailyChunkDays);
-            if (chunkEnd > toIst)
-                chunkEnd = toIst;
-            var chunk = await _angel.GetDailyCandlesAsync(
-                token.Exchange, token.SymbolToken, cursor, chunkEnd, ct);
-            all.AddRange(chunk);
-            cursor = chunkEnd.AddDays(1);
-            await Task.Delay(400, ct);
-        }
-
-        return all
-            .GroupBy(c => c.TradeDate)
-            .Select(g => g.First())
-            .OrderBy(c => c.TradeDate)
-            .ToList();
-    }
+        => await FetchCandleRangeAsync(
+            token,
+            fromIst,
+            toIst,
+            AngelHistoricalLimits.OneDay,
+            _angel.GetDailyCandlesAsync,
+            groupByTradeDate: true,
+            ct);
 
     private async Task<List<AngelCandle>> FetchHourlyChunkedAsync(
         AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct)
     {
+        var candles = await FetchCandleRangeAsync(
+            token,
+            fromIst,
+            toIst,
+            AngelHistoricalLimits.OneHour,
+            _angel.GetHourlyCandlesAsync,
+            groupByTradeDate: false,
+            ct);
+
+        if (candles.Count < 60)
+        {
+            throw new InvalidOperationException(
+                $"Not enough 1H history ({candles.Count} bars). Angel may be rate-limiting — wait 2 minutes and retry, or use Signals strategy.");
+        }
+
+        return candles;
+    }
+
+    /// <summary>
+    /// Fetches history in as few Angel requests as allowed (e.g. 1Y daily = 1 call, 1Y hourly = 1 call).
+    /// </summary>
+    private async Task<List<AngelCandle>> FetchCandleRangeAsync(
+        AngelTokenRow token,
+        DateTime fromIst,
+        DateTime toIst,
+        int maxDaysPerRequest,
+        Func<string, string, DateTime, DateTime, CancellationToken, Task<IReadOnlyList<AngelCandle>>> fetch,
+        bool groupByTradeDate,
+        CancellationToken ct)
+    {
         await _angel.EnsureSessionAsync(ct);
         var all = new List<AngelCandle>();
         var cursor = fromIst;
+
         while (cursor < toIst)
         {
             ct.ThrowIfCancellationRequested();
-            var chunkEnd = cursor.AddDays(HourlyChunkDays);
+            var chunkEnd = cursor.AddDays(maxDaysPerRequest);
             if (chunkEnd > toIst)
                 chunkEnd = toIst;
-            var chunk = await _angel.GetHourlyCandlesAsync(
-                token.Exchange, token.SymbolToken, cursor, chunkEnd, ct);
+
+            var chunk = await FetchCandlesWithRetryAsync(
+                () => fetch(token.Exchange, token.SymbolToken, cursor, chunkEnd, ct),
+                ct);
+
+            if (chunk.Count == 0 && all.Count == 0 && cursor == fromIst)
+            {
+                throw new InvalidOperationException(
+                    "Angel returned no candles (rate limit or bad token). Wait 1–2 minutes and retry.");
+            }
+
             all.AddRange(chunk);
-            cursor = chunkEnd.AddHours(1);
-            await Task.Delay(500, ct);
+
+            if (chunkEnd >= toIst)
+                break;
+
+            // Next window starts 1 minute after previous todate (Angel format is inclusive range).
+            cursor = chunkEnd.AddMinutes(1);
+            await Task.Delay(1200, ct);
+        }
+
+        if (groupByTradeDate)
+        {
+            return all
+                .GroupBy(c => c.TradeDate)
+                .Select(g => g.First())
+                .OrderBy(c => c.TradeDate)
+                .ToList();
         }
 
         return all
@@ -409,5 +448,34 @@ public sealed class BacktestService
             .Select(g => g.First())
             .OrderBy(c => c.BarTime)
             .ToList();
+    }
+
+    private async Task<IReadOnlyList<AngelCandle>> FetchCandlesWithRetryAsync(
+        Func<Task<IReadOnlyList<AngelCandle>>> fetch,
+        CancellationToken ct)
+    {
+        const int maxAttempts = 4;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var candles = await fetch();
+                if (candles.Count > 0 || attempt == maxAttempts)
+                    return candles;
+            }
+            catch (InvalidOperationException ex) when (
+                attempt < maxAttempts &&
+                (ex.Message.Contains("403", StringComparison.OrdinalIgnoreCase)
+                 || ex.Message.Contains("rate", StringComparison.OrdinalIgnoreCase)
+                 || ex.Message.Contains("Too many", StringComparison.OrdinalIgnoreCase)))
+            {
+                _logger.LogWarning(ex, "Angel rate limit on candle fetch (attempt {Attempt})", attempt);
+            }
+
+            await Task.Delay(3000 * attempt, ct);
+        }
+
+        return Array.Empty<AngelCandle>();
     }
 }

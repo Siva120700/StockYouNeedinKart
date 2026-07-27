@@ -138,6 +138,9 @@ public interface IBacktestRepository
     Task<BacktestSymbolSummary> GetSymbolSummaryAsync(
         Guid userId, Guid instrumentId, string? strategy, CancellationToken ct = default);
 
+    Task<IReadOnlyList<BacktestSymbolSummary>> GetSummariesAsync(
+        Guid userId, string? strategy, CancellationToken ct = default);
+
     Task<BacktestNoteRow> UpsertNoteAsync(BacktestNoteRow note, CancellationToken ct = default);
 
     Task<bool> DeleteNoteAsync(Guid userId, Guid noteId, CancellationToken ct = default);

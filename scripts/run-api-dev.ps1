@@ -25,4 +25,5 @@ dotnet build $ProjectPath /property:GenerateFullPaths=true /consoleloggerparamet
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ('[api] Starting GraphQL Api on http://localhost:{0} ...' -f $Port)
-dotnet run --project $ProjectPath --urls "http://localhost:$Port" --no-build
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+dotnet run --project $ProjectPath --urls "http://localhost:$Port" --no-build --environment Development

@@ -10,8 +10,7 @@ public sealed class BacktestRepository : IBacktestRepository
 
     public BacktestRepository(IDbConnectionFactory db) => _db = db;
 
-    private const string SelectNoteSql = """
-        SELECT
+    private const string NoteSelectList = """
           n.id AS Id,
           n.user_id AS UserId,
           n.instrument_id AS InstrumentId,
@@ -34,27 +33,68 @@ public sealed class BacktestRepository : IBacktestRepository
           n.r_multiple AS RMultiple,
           n.notes AS Notes,
           n.would_take_live AS WouldTakeLive,
-          n.source AS Source,
           n.created_at AS CreatedAt,
           n.updated_at AS UpdatedAt
-        FROM backtest_notes n
-        JOIN instruments i ON i.id = n.instrument_id
         """;
 
     public async Task<IReadOnlyList<BacktestNoteRow>> GetNotesAsync(
         Guid userId, Guid? instrumentId, string? strategy, CancellationToken ct = default)
     {
-        var sql = SelectNoteSql + """
-            WHERE n.user_id = @userId
-              AND (@instrumentId IS NULL OR n.instrument_id = @instrumentId)
-              AND (@strategy IS NULL OR n.strategy = @strategy)
-            ORDER BY n.signal_date DESC, n.created_at DESC
-            LIMIT 500
-            """;
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, userId);
-        var rows = await conn.QueryAsync<BacktestNoteRow>(new CommandDefinition(
-            sql, new { userId, instrumentId, strategy }, cancellationToken: ct));
+
+        var manual = await LoadNotesFromTableAsync(
+            conn, "backtest_notes", "COALESCE(NULLIF(n.source, ''), 'manual') AS Source", userId, instrumentId, strategy, ct);
+        var auto = await LoadNotesFromTableAsync(
+            conn, "backtest_auto_notes", "'auto' AS Source", userId, instrumentId, strategy, ct);
+
+        return manual
+            .Concat(auto)
+            .OrderByDescending(row => row.SignalDate)
+            .ThenByDescending(row => row.CreatedAt)
+            .Take(5000)
+            .ToList();
+    }
+
+    private static async Task<List<BacktestNoteRow>> LoadNotesFromTableAsync(
+        System.Data.IDbConnection conn,
+        string tableName,
+        string sourceExpr,
+        Guid userId,
+        Guid? instrumentId,
+        string? strategy,
+        CancellationToken ct)
+    {
+        var sql = $"""
+            SELECT
+            {NoteSelectList},
+            {sourceExpr}
+            FROM {tableName} n
+            JOIN instruments i ON i.id = n.instrument_id
+            WHERE n.user_id = @userId
+            """;
+
+        if (tableName == "backtest_notes")
+            sql += " AND COALESCE(NULLIF(n.source, ''), 'manual') <> 'auto'";
+
+        var args = new DynamicParameters();
+        args.Add("userId", userId);
+
+        if (instrumentId is Guid instId)
+        {
+            sql += " AND n.instrument_id = @instrumentId";
+            args.Add("instrumentId", instId);
+        }
+
+        if (!string.IsNullOrWhiteSpace(strategy))
+        {
+            sql += " AND n.strategy = @strategyFilter";
+            args.Add("strategyFilter", strategy);
+        }
+
+        sql += " ORDER BY n.signal_date DESC, n.created_at DESC LIMIT 5000";
+
+        var rows = await conn.QueryAsync<BacktestNoteRow>(new CommandDefinition(sql, args, cancellationToken: ct));
         return rows.ToList();
     }
 
@@ -67,6 +107,56 @@ public sealed class BacktestRepository : IBacktestRepository
               COALESCE(i.symbol, '') AS AppSymbol,
               COALESCE(i.name, '') AS InstrumentName,
               @strategy AS StrategyFilter,
+              COUNT(n.instrument_id)::int AS TimesInStrategy,
+              COUNT(n.instrument_id) FILTER (WHERE n.result = 'target')::int AS TargetHits,
+              COUNT(n.instrument_id) FILTER (WHERE n.result = 'sl')::int AS SlHits,
+              COUNT(n.instrument_id) FILTER (WHERE n.result = 'skipped')::int AS Skipped,
+              COUNT(n.instrument_id) FILTER (WHERE n.result = 'open')::int AS OpenCount,
+              CASE
+                WHEN COUNT(n.instrument_id) FILTER (WHERE n.result IN ('target', 'sl')) = 0 THEN NULL
+                ELSE ROUND(
+                  100.0 * COUNT(n.instrument_id) FILTER (WHERE n.result = 'target')
+                  / COUNT(n.instrument_id) FILTER (WHERE n.result IN ('target', 'sl')),
+                  2)
+              END AS TargetHitRatePct,
+              AVG(n.target_hit_pct) FILTER (WHERE n.target_hit_pct IS NOT NULL) AS AvgTargetHitPct
+            FROM instruments i
+            LEFT JOIN (
+              SELECT user_id, instrument_id, strategy, result, target_hit_pct
+              FROM backtest_notes
+              WHERE COALESCE(NULLIF(source, ''), 'manual') <> 'auto'
+              UNION ALL
+              SELECT user_id, instrument_id, strategy, result, target_hit_pct
+              FROM backtest_auto_notes
+            ) n
+              ON n.instrument_id = i.id
+             AND n.user_id = @userId
+             AND (@strategyFilter IS NULL OR n.strategy = @strategyFilter)
+            WHERE i.id = @instrumentId
+            GROUP BY i.symbol, i.name
+            """;
+        using var conn = _db.CreateConnection();
+        await SetUserAsync(conn, userId);
+        var row = await conn.QuerySingleOrDefaultAsync<BacktestSymbolSummary>(new CommandDefinition(
+            sql,
+            new { userId, instrumentId, strategy, strategyFilter = strategy },
+            cancellationToken: ct));
+        return row ?? new BacktestSymbolSummary
+        {
+            InstrumentId = instrumentId,
+            StrategyFilter = strategy,
+        };
+    }
+
+    public async Task<IReadOnlyList<BacktestSymbolSummary>> GetSummariesAsync(
+        Guid userId, string? strategy, CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT
+              i.id AS InstrumentId,
+              i.symbol AS AppSymbol,
+              i.name AS InstrumentName,
+              n.strategy AS StrategyFilter,
               COUNT(*)::int AS TimesInStrategy,
               COUNT(*) FILTER (WHERE n.result = 'target')::int AS TargetHits,
               COUNT(*) FILTER (WHERE n.result = 'sl')::int AS SlHits,
@@ -80,23 +170,27 @@ public sealed class BacktestRepository : IBacktestRepository
                   2)
               END AS TargetHitRatePct,
               AVG(n.target_hit_pct) FILTER (WHERE n.target_hit_pct IS NOT NULL) AS AvgTargetHitPct
-            FROM instruments i
-            LEFT JOIN backtest_notes n
-              ON n.instrument_id = i.id
-             AND n.user_id = @userId
-             AND (@strategy IS NULL OR n.strategy = @strategy)
-            WHERE i.id = @instrumentId
-            GROUP BY i.symbol, i.name
+            FROM (
+              SELECT user_id, instrument_id, strategy, result, target_hit_pct
+              FROM backtest_notes
+              WHERE COALESCE(NULLIF(source, ''), 'manual') <> 'auto'
+              UNION ALL
+              SELECT user_id, instrument_id, strategy, result, target_hit_pct
+              FROM backtest_auto_notes
+            ) n
+            JOIN instruments i ON i.id = n.instrument_id
+            WHERE n.user_id = @userId
+              AND (@strategyFilter IS NULL OR n.strategy = @strategyFilter)
+            GROUP BY i.id, i.symbol, i.name, n.strategy
+            ORDER BY i.symbol, n.strategy
             """;
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, userId);
-        var row = await conn.QuerySingleOrDefaultAsync<BacktestSymbolSummary>(new CommandDefinition(
-            sql, new { userId, instrumentId, strategy }, cancellationToken: ct));
-        return row ?? new BacktestSymbolSummary
-        {
-            InstrumentId = instrumentId,
-            StrategyFilter = strategy,
-        };
+        var rows = await conn.QueryAsync<BacktestSymbolSummary>(new CommandDefinition(
+            sql,
+            new { userId, strategyFilter = strategy },
+            cancellationToken: ct));
+        return rows.ToList();
     }
 
     public async Task<BacktestNoteRow> UpsertNoteAsync(BacktestNoteRow note, CancellationToken ct = default)
@@ -151,22 +245,83 @@ public sealed class BacktestRepository : IBacktestRepository
                 """;
             var affected = await conn.ExecuteAsync(new CommandDefinition(updateSql, note, cancellationToken: ct));
             if (affected == 0)
+            {
+                const string updateAutoSql = """
+                    UPDATE backtest_auto_notes SET
+                      instrument_id = @InstrumentId,
+                      strategy = @Strategy,
+                      side = @Side::signal_side,
+                      signal_date = @SignalDate,
+                      entry_price = @EntryPrice,
+                      initial_stop_loss = @InitialStopLoss,
+                      target_t1 = @TargetT1,
+                      target_t2 = @TargetT2,
+                      target_t3 = @TargetT3,
+                      result = @Result,
+                      target_level = @TargetLevel,
+                      target_hit_pct = @TargetHitPct,
+                      exit_price = @ExitPrice,
+                      exit_date = @ExitDate,
+                      pnl_pct = @PnlPct,
+                      r_multiple = @RMultiple,
+                      notes = @Notes,
+                      would_take_live = @WouldTakeLive,
+                      updated_at = now()
+                    WHERE id = @Id AND user_id = @UserId
+                    """;
+                affected = await conn.ExecuteAsync(new CommandDefinition(updateAutoSql, note, cancellationToken: ct));
+            }
+            if (affected == 0)
                 throw new InvalidOperationException("Backtest note not found.");
         }
 
-        var saved = await conn.QuerySingleAsync<BacktestNoteRow>(new CommandDefinition(
-            SelectNoteSql + " WHERE n.id = @id AND n.user_id = @userId",
-            new { id = note.Id, userId = note.UserId },
-            cancellationToken: ct));
-        return saved;
+        return await GetNoteByIdAsync(conn, note.UserId, note.Id, ct)
+            ?? throw new InvalidOperationException("Backtest note not found after save.");
+    }
+
+    private static async Task<BacktestNoteRow?> GetNoteByIdAsync(
+        System.Data.IDbConnection conn, Guid userId, Guid noteId, CancellationToken ct)
+    {
+        var manualSql = $"""
+            SELECT
+            {NoteSelectList},
+              COALESCE(NULLIF(n.source, ''), 'manual') AS Source
+            FROM backtest_notes n
+            JOIN instruments i ON i.id = n.instrument_id
+            WHERE n.id = @noteId AND n.user_id = @userId
+            """;
+        var autoSql = $"""
+            SELECT
+            {NoteSelectList},
+              'auto' AS Source
+            FROM backtest_auto_notes n
+            JOIN instruments i ON i.id = n.instrument_id
+            WHERE n.id = @noteId AND n.user_id = @userId
+            """;
+
+        var manual = await conn.QuerySingleOrDefaultAsync<BacktestNoteRow>(new CommandDefinition(
+            manualSql, new { noteId, userId }, cancellationToken: ct));
+        if (manual is not null)
+            return manual;
+
+        return await conn.QuerySingleOrDefaultAsync<BacktestNoteRow>(new CommandDefinition(
+            autoSql, new { noteId, userId }, cancellationToken: ct));
     }
 
     public async Task<bool> DeleteNoteAsync(Guid userId, Guid noteId, CancellationToken ct = default)
     {
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, userId);
-        var affected = await conn.ExecuteAsync(new CommandDefinition(
-            "DELETE FROM backtest_notes WHERE id = @noteId AND user_id = @userId",
+        var affected = await conn.ExecuteScalarAsync<int>(new CommandDefinition(
+            """
+            WITH d1 AS (
+                DELETE FROM backtest_notes WHERE id = @noteId AND user_id = @userId RETURNING 1
+            ),
+            d2 AS (
+                DELETE FROM backtest_auto_notes WHERE id = @noteId AND user_id = @userId RETURNING 1
+            )
+            SELECT COALESCE((SELECT COUNT(*) FROM d1), 0) + COALESCE((SELECT COUNT(*) FROM d2), 0)
+            """,
             new { noteId, userId },
             cancellationToken: ct));
         return affected > 0;
@@ -212,13 +367,12 @@ public sealed class BacktestRepository : IBacktestRepository
         await SetUserAsync(conn, userId);
         await conn.ExecuteAsync(new CommandDefinition(
             """
-            DELETE FROM backtest_notes
+            DELETE FROM backtest_auto_notes
             WHERE user_id = @userId
               AND instrument_id = @instrumentId
-              AND strategy = @strategy
-              AND source = 'auto'
+              AND strategy = @strategyFilter
             """,
-            new { userId, instrumentId, strategy },
+            new { userId, instrumentId, strategyFilter = strategy },
             cancellationToken: ct));
     }
 
@@ -228,16 +382,16 @@ public sealed class BacktestRepository : IBacktestRepository
             return;
 
         const string sql = """
-            INSERT INTO backtest_notes (
+            INSERT INTO backtest_auto_notes (
               user_id, instrument_id, strategy, side, signal_date,
               entry_price, initial_stop_loss, target_t1, target_t2, target_t3,
               result, target_level, target_hit_pct, exit_price, exit_date,
-              pnl_pct, r_multiple, notes, would_take_live, source)
+              pnl_pct, r_multiple, notes, would_take_live)
             VALUES (
               @UserId, @InstrumentId, @Strategy, @Side::signal_side, @SignalDate,
               @EntryPrice, @InitialStopLoss, @TargetT1, @TargetT2, @TargetT3,
               @Result, @TargetLevel, @TargetHitPct, @ExitPrice, @ExitDate,
-              @PnlPct, @RMultiple, @Notes, @WouldTakeLive, 'auto')
+              @PnlPct, @RMultiple, @Notes, @WouldTakeLive)
             """;
 
         using var conn = _db.CreateConnection();

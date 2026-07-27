@@ -1,6 +1,7 @@
 using StockYouNeed.Application.Abstractions;
 using StockYouNeed.Application.Services;
 using StockYouNeed.Domain;
+using HotChocolate;
 
 namespace StockYouNeed.Api.GraphQL;
 
@@ -64,7 +65,16 @@ public sealed class Query
         [Service] ICurrentUserAccessor user,
         [Service] IBacktestRepository backtest,
         CancellationToken ct)
-        => await backtest.GetNotesAsync(user.UserId, instrumentId, NormalizeStrategy(strategy), ct);
+    {
+        try
+        {
+            return await backtest.GetNotesAsync(user.UserId, instrumentId, NormalizeStrategy(strategy), ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
 
     public async Task<BacktestSymbolSummary> BacktestSummary(
         Guid instrumentId,
@@ -72,7 +82,32 @@ public sealed class Query
         [Service] ICurrentUserAccessor user,
         [Service] IBacktestRepository backtest,
         CancellationToken ct)
-        => await backtest.GetSymbolSummaryAsync(user.UserId, instrumentId, NormalizeStrategy(strategy), ct);
+    {
+        try
+        {
+            return await backtest.GetSymbolSummaryAsync(user.UserId, instrumentId, NormalizeStrategy(strategy), ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
+    public async Task<IReadOnlyList<BacktestSymbolSummary>> BacktestSummaries(
+        string? strategy,
+        [Service] ICurrentUserAccessor user,
+        [Service] IBacktestRepository backtest,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await backtest.GetSummariesAsync(user.UserId, NormalizeStrategy(strategy), ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
 
     private static string? NormalizeStrategy(string? strategy)
     {
@@ -230,7 +265,22 @@ public sealed class Mutation
         [Service] ICurrentUserAccessor user,
         [Service] BacktestService backtest,
         CancellationToken ct)
-        => await backtest.RunHistoricalAsync(user.UserId, instrumentId, strategy, ct);
+    {
+        try
+        {
+            return await backtest.RunHistoricalAsync(user.UserId, instrumentId, strategy, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Always surface a readable message (not HotChocolate's "Unexpected Execution Error").
+            throw new GraphQLException(
+                ErrorBuilder.New()
+                    .SetMessage(ex.Message)
+                    .SetCode("BACKTEST_FAILED")
+                    .SetExtension("strategy", strategy)
+                    .Build());
+        }
+    }
 }
 
 public sealed class BacktestNoteInput

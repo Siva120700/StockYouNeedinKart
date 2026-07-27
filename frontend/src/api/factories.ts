@@ -113,6 +113,20 @@ export const DataFactory = {
     );
     return data.backtestSummary;
   },
+
+  async backtestSummaries(strategy?: string | null): Promise<BacktestSymbolSummary[]> {
+    const data = await gql<{ backtestSummaries: BacktestSymbolSummary[] }>(
+      `query ($strategy: String) {
+        backtestSummaries(strategy: $strategy) {
+          instrumentId appSymbol instrumentName strategyFilter
+          timesInStrategy targetHits slHits skipped openCount
+          targetHitRatePct avgTargetHitPct
+        }
+      }`,
+      { strategy: strategy ?? null },
+    );
+    return data.backtestSummaries;
+  },
 };
 
 export const ActionFactory = {

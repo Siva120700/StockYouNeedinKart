@@ -14,15 +14,15 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { CaretLeft, CaretRight, FloppyDisk, Play, Trash } from "@phosphor-icons/react";
+import { FloppyDisk, Play } from "@phosphor-icons/react";
 import { ActionFactory, DataFactory } from "../api/factories";
 import type {
-  BacktestNote,
   BacktestNoteInput,
   BacktestSymbolSummary,
   UniverseInstrument,
 } from "../api/types";
 import { columnFactories } from "../zen_components/table/columnFactories";
+import type { ColumnConfig } from "../zen_components/table/columnTypes";
 import ZenTable from "../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../constants";
@@ -57,50 +57,103 @@ function emptyForm(instrumentId: string): BacktestNoteInput {
   };
 }
 
-function numOrNull(v: string): number | null {
-  if (v.trim() === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+function strategyLabel(strategy: string | null | undefined): string {
+  if (strategy === "liquidity") return "Liquidity";
+  if (strategy === "signals") return "Signals";
+  return strategy ?? "";
 }
+
+function summaryRowId(row: BacktestSymbolSummary): string {
+  return `${row.instrumentId}-${row.strategyFilter ?? "unknown"}`;
+}
+
+const summaryColumns: ColumnConfig<BacktestSymbolSummary>[] = [
+  columnFactories.createTextColumn<BacktestSymbolSummary>({
+    field: "appSymbol",
+    headerName: "Symbol",
+    width: 100,
+    getValue: (r) => r.appSymbol,
+  }),
+  columnFactories.createTextColumn<BacktestSymbolSummary>({
+    field: "instrumentName",
+    headerName: "Stock name",
+    width: 180,
+    getValue: (r) => r.instrumentName,
+  }),
+  columnFactories.createTextColumn<BacktestSymbolSummary>({
+    field: "strategyFilter",
+    headerName: "Strategy",
+    width: 110,
+    getValue: (r) => strategyLabel(r.strategyFilter),
+  }),
+  columnFactories.createNumberColumn<BacktestSymbolSummary>({
+    field: "timesInStrategy",
+    headerName: "Setups",
+    width: 90,
+    getValue: (r) => r.timesInStrategy,
+  }),
+  columnFactories.createNumberColumn<BacktestSymbolSummary>({
+    field: "targetHits",
+    headerName: "Target hits",
+    width: 110,
+    getValue: (r) => r.targetHits,
+  }),
+  columnFactories.createNumberColumn<BacktestSymbolSummary>({
+    field: "slHits",
+    headerName: "SL hits",
+    width: 90,
+    getValue: (r) => r.slHits,
+  }),
+  columnFactories.createTextColumn<BacktestSymbolSummary>({
+    field: "targetHitRatePct",
+    headerName: "Hit rate",
+    width: 100,
+    getValue: (r) =>
+      r.targetHitRatePct != null ? `${Number(r.targetHitRatePct).toFixed(1)}%` : "—",
+  }),
+  columnFactories.createTextColumn<BacktestSymbolSummary>({
+    field: "avgTargetHitPct",
+    headerName: "Avg target %",
+    width: 120,
+    getValue: (r) =>
+      r.avgTargetHitPct != null ? `${Number(r.avgTargetHitPct).toFixed(0)}%` : "—",
+  }),
+];
 
 export default function BacktestPage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
 
   const [universe, setUniverse] = useState<UniverseInstrument[]>([]);
-  const [index, setIndex] = useState(0);
-  const [strategyFilter, setStrategyFilter] = useState<StrategyFilter>("all");
-  const [notes, setNotes] = useState<BacktestNote[]>([]);
-  const [summary, setSummary] = useState<BacktestSymbolSummary | null>(null);
+  const [runTarget, setRunTarget] = useState<UniverseInstrument | null>(null);
+  const [strategyFilter, setStrategyFilter] = useState<StrategyFilter>(() => {
+    const saved = sessionStorage.getItem("backtest.strategyFilter");
+    return saved === "signals" || saved === "liquidity" || saved === "all"
+      ? saved
+      : "all";
+  });
+  const [summaries, setSummaries] = useState<BacktestSymbolSummary[]>([]);
   const [form, setForm] = useState<BacktestNoteInput>(emptyForm(""));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showManualForm, setShowManualForm] = useState(false);
 
-  const current = universe[index] ?? null;
-  const strategyArg = strategyFilter === "all" ? null : strategyFilter;
-
-  const loadSymbolData = useCallback(
-    async (instrumentId: string) => {
-      setIsSyncing(true);
-      setError(null);
-      try {
-        const [n, s] = await Promise.all([
-          DataFactory.backtestNotes(instrumentId, strategyArg),
-          DataFactory.backtestSummary(instrumentId, strategyArg),
-        ]);
-        setNotes(n);
-        setSummary(s);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setIsSyncing(false);
-        setLoading(false);
-      }
-    },
-    [strategyArg, setIsSyncing],
-  );
+  const loadSummaries = useCallback(async () => {
+    setIsSyncing(true);
+    setError(null);
+    try {
+      const strat = strategyFilter === "all" ? null : strategyFilter;
+      const rows = await DataFactory.backtestSummaries(strat);
+      setSummaries(rows);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsSyncing(false);
+      setLoading(false);
+    }
+  }, [strategyFilter, setIsSyncing]);
 
   useEffect(() => {
     setTitle("Backtest");
@@ -112,12 +165,10 @@ export default function BacktestPage() {
         const sorted = [...list].sort((a, b) => a.symbol.localeCompare(b.symbol));
         setUniverse(sorted);
         if (sorted[0]) {
-          setIndex(0);
+          setRunTarget(sorted[0]);
           setForm(emptyForm(sorted[0].id));
-          await loadSymbolData(sorted[0].id);
-        } else {
-          setLoading(false);
         }
+        await loadSummaries();
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setLoading(false);
@@ -128,18 +179,11 @@ export default function BacktestPage() {
   }, []);
 
   useEffect(() => {
-    if (!current) return;
-    setForm((prev) => ({ ...emptyForm(current.id), strategy: prev.strategy || "signals" }));
-    void loadSymbolData(current.id);
-  }, [current?.id, strategyFilter]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function go(delta: number) {
-    if (universe.length === 0) return;
-    setIndex((i) => (i + delta + universe.length) % universe.length);
-  }
+    void loadSummaries();
+  }, [loadSummaries]);
 
   async function onRunHistorical() {
-    if (!current) return;
+    if (!runTarget) return;
     setRunning(true);
     setError(null);
     setIsSyncing(true);
@@ -147,9 +191,9 @@ export default function BacktestPage() {
       const strategies =
         strategyFilter === "all" ? (["signals", "liquidity"] as const) : ([strategyFilter] as const);
       for (const s of strategies) {
-        await ActionFactory.runHistoricalBacktest(current.id, s);
+        await ActionFactory.runHistoricalBacktest(runTarget.id, s);
       }
-      await loadSymbolData(current.id);
+      await loadSummaries();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -159,13 +203,13 @@ export default function BacktestPage() {
   }
 
   async function onSave() {
-    if (!current) return;
+    if (!runTarget) return;
     setSaving(true);
     setError(null);
     try {
       const payload: BacktestNoteInput = {
         ...form,
-        instrumentId: current.id,
+        instrumentId: runTarget.id,
         entryPrice: Number(form.entryPrice) || 0,
         initialStopLoss: Number(form.initialStopLoss) || 0,
         targetHitPct:
@@ -173,8 +217,8 @@ export default function BacktestPage() {
         targetLevel: form.result === "target" ? form.targetLevel || "t1" : form.targetLevel,
       };
       await ActionFactory.upsertBacktestNote(payload);
-      setForm(emptyForm(current.id));
-      await loadSymbolData(current.id);
+      setForm(emptyForm(runTarget.id));
+      await loadSummaries();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -182,186 +226,49 @@ export default function BacktestPage() {
     }
   }
 
-  async function onDelete(noteId: string) {
-    if (!current) return;
-    setError(null);
-    try {
-      await ActionFactory.deleteBacktestNote(noteId);
-      await loadSymbolData(current.id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  function loadIntoForm(note: BacktestNote) {
-    setForm({
-      id: note.id,
-      instrumentId: note.instrumentId,
-      strategy: note.strategy,
-      side: note.side,
-      signalDate: note.signalDate?.slice(0, 10) ?? todayIso(),
-      entryPrice: note.entryPrice,
-      initialStopLoss: note.initialStopLoss,
-      targetT1: note.targetT1 ?? null,
-      targetT2: note.targetT2 ?? null,
-      targetT3: note.targetT3 ?? null,
-      result: note.result,
-      targetLevel: note.targetLevel ?? null,
-      targetHitPct: note.targetHitPct ?? null,
-      exitPrice: note.exitPrice ?? null,
-      exitDate: note.exitDate?.slice(0, 10) ?? null,
-      pnlPct: note.pnlPct ?? null,
-      rMultiple: note.rMultiple ?? null,
-      notes: note.notes ?? "",
-      wouldTakeLive: note.wouldTakeLive ?? null,
-    });
-  }
-
-  const columns = useMemo(
-    () => [
-      columnFactories.createTextColumn<BacktestNote>({
-        field: "signalDate",
-        headerName: "Date",
-        width: 110,
-        getValue: (r) => r.signalDate?.slice(0, 10) ?? "",
-      }),
-      columnFactories.createTextColumn<BacktestNote>({
-        field: "strategy",
-        headerName: "Strategy",
-        width: 100,
-        getValue: (r) => r.strategy,
-      }),
-      columnFactories.createTextColumn<BacktestNote>({
-        field: "source",
-        headerName: "Src",
-        width: 70,
-        getValue: (r) => r.source ?? "manual",
-      }),
-      columnFactories.createStatusColumn<BacktestNote>(
-        {
-          buy: { label: "BUY", color: "#2e7d32" },
-          sell: { label: "SELL", color: "#c62828" },
-        },
-        { field: "side", headerName: "Side", width: 80, getValue: (r) => r.side },
-      ),
-      columnFactories.createNumberColumn<BacktestNote>({
-        field: "entryPrice",
-        headerName: "Entry",
-        width: 90,
-        minDecimalPlaces: 2,
-        getValue: (r) => r.entryPrice,
-      }),
-      columnFactories.createTextColumn<BacktestNote>({
-        field: "result",
-        headerName: "Result",
-        width: 90,
-        getValue: (r) =>
-          r.result === "target"
-            ? `Target ${(r.targetLevel ?? "").toUpperCase()}`
-            : r.result === "sl"
-              ? "SL"
-              : r.result,
-      }),
-      columnFactories.createTextColumn<BacktestNote>({
-        field: "targetHitPct",
-        headerName: "Target %",
-        width: 90,
-        getValue: (r) =>
-          r.targetHitPct != null && Number.isFinite(Number(r.targetHitPct))
-            ? `${Number(r.targetHitPct).toFixed(0)}%`
-            : "",
-      }),
-      columnFactories.createTextColumn<BacktestNote>({
-        field: "pnlPct",
-        headerName: "PnL %",
-        width: 80,
-        getValue: (r) =>
-          r.pnlPct != null && Number.isFinite(Number(r.pnlPct))
-            ? `${Number(r.pnlPct).toFixed(2)}%`
-            : "",
-      }),
-      columnFactories.createTextColumn<BacktestNote>({
-        field: "notes",
-        headerName: "Notes",
-        width: 180,
-        getValue: (r) => r.notes,
-      }),
-      columnFactories.createActionColumn<BacktestNote>(
-        () => [
-          {
-            icon: <FloppyDisk size={DEFAULT_SMALL_ICON_SIZE} />,
-            tooltip: "Edit",
-            onClick: (r) => loadIntoForm(r),
-          },
-          {
-            icon: <Trash size={DEFAULT_SMALL_ICON_SIZE} />,
-            tooltip: "Delete",
-            onClick: (r) => void onDelete(r.id),
-          },
-        ],
-        { field: "actions", headerName: "", width: 96 },
-      ),
-    ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [current?.id],
-  );
+  const tableRows = useMemo(() => {
+    if (strategyFilter === "all") return summaries;
+    return summaries.filter((r) => r.strategyFilter === strategyFilter);
+  }, [summaries, strategyFilter]);
 
   return (
     <MuiStack spacing={2}>
       {error ? <Alert severity="error">{error}</Alert> : null}
 
       <MuiStack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-        <Button
-          size="small"
-          variant="outlined"
-          disabled={universe.length === 0}
-          startIcon={<CaretLeft size={DEFAULT_SMALL_ICON_SIZE} />}
-          onClick={() => go(-1)}
-        >
-          Prev
-        </Button>
-        <Autocomplete
-          sx={{ minWidth: 260 }}
-          size="small"
-          options={universe}
-          getOptionLabel={(o) => `${o.symbol} — ${o.name}`}
-          value={current}
-          onChange={(_, v) => {
-            if (!v) return;
-            const i = universe.findIndex((u) => u.id === v.id);
-            if (i >= 0) setIndex(i);
-          }}
-          renderInput={(params) => <TextField {...params} label="Symbol" />}
-          isOptionEqualToValue={(a, b) => a.id === b.id}
-        />
-        <Button
-          size="small"
-          variant="outlined"
-          disabled={universe.length === 0}
-          endIcon={<CaretRight size={DEFAULT_SMALL_ICON_SIZE} />}
-          onClick={() => go(1)}
-        >
-          Next
-        </Button>
-        <Typography variant="body2" color="text.secondary">
-          {universe.length ? `${index + 1} / ${universe.length}` : "No universe"}
-        </Typography>
         <FormControl size="small" sx={{ minWidth: 140 }}>
           <InputLabel>Strategy</InputLabel>
           <Select
             label="Strategy"
             value={strategyFilter}
-            onChange={(e) => setStrategyFilter(e.target.value as StrategyFilter)}
+            onChange={(e) => {
+              const next = e.target.value as StrategyFilter;
+              setStrategyFilter(next);
+              sessionStorage.setItem("backtest.strategyFilter", next);
+            }}
           >
             <MenuItem value="all">All</MenuItem>
             <MenuItem value="signals">Signals</MenuItem>
             <MenuItem value="liquidity">Liquidity</MenuItem>
           </Select>
         </FormControl>
+        <Autocomplete
+          sx={{ minWidth: 260 }}
+          size="small"
+          options={universe}
+          getOptionLabel={(o) => `${o.symbol} — ${o.name}`}
+          value={runTarget}
+          onChange={(_, v) => {
+            setRunTarget(v);
+            if (v) setForm((prev) => ({ ...emptyForm(v.id), strategy: prev.strategy || "signals" }));
+          }}
+          renderInput={(params) => <TextField {...params} label="Run 1Y for" />}
+          isOptionEqualToValue={(a, b) => a.id === b.id}
+        />
         <Button
           size="small"
           variant="contained"
-          disabled={!current || running || loading}
+          disabled={!runTarget || running || loading}
           startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
           onClick={() => void onRunHistorical()}
         >
@@ -373,272 +280,116 @@ export default function BacktestPage() {
               ? "Run 1Y (both)"
               : "Run 1Y backtest"}
         </Button>
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={showManualForm}
+              onChange={(e) => setShowManualForm(e.target.checked)}
+            />
+          }
+          label="Manual note"
+        />
       </MuiStack>
 
-      {summary && current ? (
+      <ZenTable
+        columns={summaryColumns}
+        rows={tableRows}
+        getRowId={summaryRowId}
+        loading={loading}
+        emptyMessage="No backtest data yet. Pick a symbol and run 1Y backtest."
+        defaultPageSize={50}
+      />
+
+      {showManualForm ? (
         <Box
           sx={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-            gap: 1.5,
-            p: 1.5,
+            p: 2,
             bgcolor: "background.paper",
             border: "1px solid",
             borderColor: "divider",
             borderRadius: 1,
           }}
         >
-          <Stat label="In strategy" value={String(summary.timesInStrategy)} />
-          <Stat label="Target hits" value={String(summary.targetHits)} />
-          <Stat label="SL hits" value={String(summary.slHits)} />
-          <Stat
-            label="Target hit rate"
-            value={
-              summary.targetHitRatePct != null
-                ? `${Number(summary.targetHitRatePct).toFixed(1)}%`
-                : "—"
-            }
-          />
-          <Stat
-            label="Avg target %"
-            value={
-              summary.avgTargetHitPct != null
-                ? `${Number(summary.avgTargetHitPct).toFixed(0)}%`
-                : "—"
-            }
-          />
-          <Stat label="Skipped" value={String(summary.skipped)} />
-        </Box>
-      ) : null}
-
-      <Box
-        sx={{
-          p: 2,
-          bgcolor: "background.paper",
-          border: "1px solid",
-          borderColor: "divider",
-          borderRadius: 1,
-        }}
-      >
-        <Typography variant="subtitle1" sx={{ mb: 1.5 }}>
-          {form.id ? "Edit note" : "Add note"} {current ? `· ${current.symbol}` : ""}
-        </Typography>
-        <MuiStack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>Strategy</InputLabel>
-            <Select
-              label="Strategy"
-              value={form.strategy}
-              onChange={(e) => setForm({ ...form, strategy: e.target.value })}
-            >
-              <MenuItem value="signals">Signals</MenuItem>
-              <MenuItem value="liquidity">Liquidity</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 100 }}>
-            <InputLabel>Side</InputLabel>
-            <Select
-              label="Side"
-              value={form.side}
-              onChange={(e) => setForm({ ...form, side: e.target.value })}
-            >
-              <MenuItem value="buy">BUY</MenuItem>
-              <MenuItem value="sell">SELL</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField
-            size="small"
-            label="Signal date"
-            type="date"
-            InputLabelProps={{ shrink: true }}
-            value={form.signalDate}
-            onChange={(e) => setForm({ ...form, signalDate: e.target.value })}
-          />
-          <TextField
-            size="small"
-            label="Entry"
-            type="number"
-            value={form.entryPrice || ""}
-            onChange={(e) => setForm({ ...form, entryPrice: Number(e.target.value) || 0 })}
-            sx={{ width: 110 }}
-          />
-          <TextField
-            size="small"
-            label="SL"
-            type="number"
-            value={form.initialStopLoss || ""}
-            onChange={(e) => setForm({ ...form, initialStopLoss: Number(e.target.value) || 0 })}
-            sx={{ width: 110 }}
-          />
-          <TextField
-            size="small"
-            label="T1"
-            type="number"
-            value={form.targetT1 ?? ""}
-            onChange={(e) => setForm({ ...form, targetT1: numOrNull(e.target.value) })}
-            sx={{ width: 100 }}
-          />
-          <TextField
-            size="small"
-            label="T2"
-            type="number"
-            value={form.targetT2 ?? ""}
-            onChange={(e) => setForm({ ...form, targetT2: numOrNull(e.target.value) })}
-            sx={{ width: 100 }}
-          />
-          <TextField
-            size="small"
-            label="T3"
-            type="number"
-            value={form.targetT3 ?? ""}
-            onChange={(e) => setForm({ ...form, targetT3: numOrNull(e.target.value) })}
-            sx={{ width: 100 }}
-          />
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>Result</InputLabel>
-            <Select
-              label="Result"
-              value={form.result}
-              onChange={(e) => {
-                const result = e.target.value;
-                setForm({
-                  ...form,
-                  result,
-                  targetLevel: result === "target" ? form.targetLevel || "t1" : null,
-                  targetHitPct:
-                    result === "target"
-                      ? form.targetHitPct ?? 100
-                      : result === "sl"
-                        ? 0
-                        : form.targetHitPct,
-                });
-              }}
-            >
-              <MenuItem value="target">Target</MenuItem>
-              <MenuItem value="sl">SL</MenuItem>
-              <MenuItem value="skipped">Skipped</MenuItem>
-              <MenuItem value="open">Open</MenuItem>
-              <MenuItem value="time_stop">Time stop</MenuItem>
-            </Select>
-          </FormControl>
-          {form.result === "target" ? (
-            <FormControl size="small" sx={{ minWidth: 90 }}>
-              <InputLabel>Level</InputLabel>
+          <Typography variant="subtitle1" sx={{ mb: 1.5 }}>
+            {form.id ? "Edit manual note" : "Add manual note"}{" "}
+            {runTarget ? `· ${runTarget.symbol}` : ""}
+          </Typography>
+          <MuiStack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>Strategy</InputLabel>
               <Select
-                label="Level"
-                value={form.targetLevel || "t1"}
-                onChange={(e) => setForm({ ...form, targetLevel: e.target.value })}
+                label="Strategy"
+                value={form.strategy}
+                onChange={(e) => setForm({ ...form, strategy: e.target.value })}
               >
-                <MenuItem value="t1">T1</MenuItem>
-                <MenuItem value="t2">T2</MenuItem>
-                <MenuItem value="t3">T3</MenuItem>
+                <MenuItem value="signals">Signals</MenuItem>
+                <MenuItem value="liquidity">Liquidity</MenuItem>
               </Select>
             </FormControl>
-          ) : null}
-          <TextField
-            size="small"
-            label="Target hit %"
-            type="number"
-            value={form.targetHitPct ?? ""}
-            onChange={(e) => setForm({ ...form, targetHitPct: numOrNull(e.target.value) })}
-            sx={{ width: 120 }}
-          />
-          <TextField
-            size="small"
-            label="Exit"
-            type="number"
-            value={form.exitPrice ?? ""}
-            onChange={(e) => setForm({ ...form, exitPrice: numOrNull(e.target.value) })}
-            sx={{ width: 100 }}
-          />
-          <TextField
-            size="small"
-            label="Exit date"
-            type="date"
-            InputLabelProps={{ shrink: true }}
-            value={form.exitDate ?? ""}
-            onChange={(e) => setForm({ ...form, exitDate: e.target.value || null })}
-          />
-          <TextField
-            size="small"
-            label="PnL %"
-            type="number"
-            value={form.pnlPct ?? ""}
-            onChange={(e) => setForm({ ...form, pnlPct: numOrNull(e.target.value) })}
-            sx={{ width: 100 }}
-          />
-          <TextField
-            size="small"
-            label="R multiple"
-            type="number"
-            value={form.rMultiple ?? ""}
-            onChange={(e) => setForm({ ...form, rMultiple: numOrNull(e.target.value) })}
-            sx={{ width: 110 }}
-          />
-          <FormControlLabel
-            control={
-              <Switch
-                size="small"
-                checked={form.wouldTakeLive === true}
-                onChange={(e) =>
-                  setForm({ ...form, wouldTakeLive: e.target.checked ? true : null })
-                }
-              />
-            }
-            label="Would take live"
-          />
-          <TextField
-            size="small"
-            label="Notes"
-            value={form.notes ?? ""}
-            onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            sx={{ minWidth: 220, flex: 1 }}
-          />
-          <Button
-            variant="contained"
-            size="small"
-            disabled={!current || saving}
-            startIcon={<FloppyDisk size={DEFAULT_SMALL_ICON_SIZE} />}
-            onClick={() => void onSave()}
-          >
-            {saving ? "Saving…" : form.id ? "Update" : "Save note"}
-          </Button>
-          {form.id ? (
-            <Button
+            <FormControl size="small" sx={{ minWidth: 100 }}>
+              <InputLabel>Side</InputLabel>
+              <Select
+                label="Side"
+                value={form.side}
+                onChange={(e) => setForm({ ...form, side: e.target.value })}
+              >
+                <MenuItem value="buy">BUY</MenuItem>
+                <MenuItem value="sell">SELL</MenuItem>
+              </Select>
+            </FormControl>
+            <TextField
               size="small"
-              variant="text"
-              onClick={() => current && setForm(emptyForm(current.id))}
+              label="Signal date"
+              type="date"
+              InputLabelProps={{ shrink: true }}
+              value={form.signalDate}
+              onChange={(e) => setForm({ ...form, signalDate: e.target.value })}
+            />
+            <TextField
+              size="small"
+              label="Entry"
+              type="number"
+              value={form.entryPrice || ""}
+              onChange={(e) => setForm({ ...form, entryPrice: Number(e.target.value) || 0 })}
+              sx={{ width: 110 }}
+            />
+            <TextField
+              size="small"
+              label="SL"
+              type="number"
+              value={form.initialStopLoss || ""}
+              onChange={(e) =>
+                setForm({ ...form, initialStopLoss: Number(e.target.value) || 0 })
+              }
+              sx={{ width: 110 }}
+            />
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>Result</InputLabel>
+              <Select
+                label="Result"
+                value={form.result}
+                onChange={(e) => setForm({ ...form, result: e.target.value })}
+              >
+                <MenuItem value="target">Target</MenuItem>
+                <MenuItem value="sl">SL</MenuItem>
+                <MenuItem value="skipped">Skipped</MenuItem>
+                <MenuItem value="open">Open</MenuItem>
+                <MenuItem value="time_stop">Time stop</MenuItem>
+              </Select>
+            </FormControl>
+            <Button
+              variant="contained"
+              size="small"
+              disabled={!runTarget || saving}
+              startIcon={<FloppyDisk size={DEFAULT_SMALL_ICON_SIZE} />}
+              onClick={() => void onSave()}
             >
-              Clear
+              {saving ? "Saving…" : form.id ? "Update" : "Save note"}
             </Button>
-          ) : null}
-        </MuiStack>
-      </Box>
-
-      <ZenTable
-        columns={columns}
-        rows={notes}
-        getRowId={(r) => r.id}
-        loading={loading}
-        emptyMessage={
-          current
-            ? "No backtest notes for this symbol yet. Add one above."
-            : "No universe symbols. Start the API so seed can run."
-        }
-      />
+          </MuiStack>
+        </Box>
+      ) : null}
     </MuiStack>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <Box>
-      <Typography variant="caption" color="text.secondary">
-        {label}
-      </Typography>
-      <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
-        {value}
-      </Typography>
-    </Box>
   );
 }

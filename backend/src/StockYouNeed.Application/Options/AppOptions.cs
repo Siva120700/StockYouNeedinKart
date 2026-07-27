@@ -18,6 +18,10 @@ public sealed class AngelOptions
         "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json";
     /// <summary>When false, workers skip live Angel calls (useful for local UI wiring).</summary>
     public bool Enabled { get; set; } = true;
+    /// <summary>Minimum gap between any Angel HTTP call (login, quote, candles).</summary>
+    public int MinRequestIntervalMs { get; set; } = 1000;
+    /// <summary>After a login rate-limit (403), block further login attempts for this many minutes.</summary>
+    public int LoginCooldownMinutes { get; set; } = 3;
 }
 
 public sealed class WorkerScheduleOptions

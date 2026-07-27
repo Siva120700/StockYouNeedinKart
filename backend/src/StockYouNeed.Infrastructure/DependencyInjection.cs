@@ -23,7 +23,10 @@ public static class DependencyInjection
         services.Configure<DevAuthOptions>(configuration.GetSection(DevAuthOptions.SectionName));
 
         services.AddSingleton<IDbConnectionFactory, NpgsqlConnectionFactory>();
-        services.AddHttpClient<IAngelMarketDataClient, AngelMarketDataClient>();
+        // Singleton so JWT session is reused (transient typed client was re-logging in every scope → 403 rate limit).
+        services.AddHttpClient<AngelMarketDataClient>();
+        services.AddSingleton<AngelMarketDataClient>();
+        services.AddSingleton<IAngelMarketDataClient>(sp => sp.GetRequiredService<AngelMarketDataClient>());
         services.AddScoped<IInstrumentRepository, InstrumentRepository>();
         services.AddScoped<IMarketDataRepository, MarketDataRepository>();
         services.AddScoped<IPortfolioRepository, PortfolioRepository>();

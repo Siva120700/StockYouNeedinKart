@@ -6,7 +6,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/graphql": "http://localhost:5080",
+      "/graphql": {
+        target: "http://localhost:5080",
+        timeout: 900_000,
+        proxyTimeout: 900_000,
+      },
       "/health": "http://localhost:5080",
     },
   },
