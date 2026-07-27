@@ -134,6 +134,7 @@ public sealed class LiquiditySignalRow
     public decimal RvolPercentile { get; set; }
     public bool RvolOk { get; set; }
     public bool StrongClose { get; set; }
+    public bool SectorConfirmed { get; set; }
     public string? SweepSide { get; set; }
     public string? SweptZoneType { get; set; }
     public decimal? SweptZonePrice { get; set; }

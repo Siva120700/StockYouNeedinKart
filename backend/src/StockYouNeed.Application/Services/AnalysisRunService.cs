@@ -196,6 +196,8 @@ public sealed class AnalysisRunService
                     if (sectorTokens.Count == 0)
                         await _tokenSync.SyncUniverseTokensAsync(ct);
                     await _barsSync.SyncMissingSectorBarsAsync(ct);
+                    // Keep sector "latest" = today (same live OHLC idea as equities above).
+                    await RefreshSectorDailyBarsFromQuotesAsync(asOf, sectorTokens, ct);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -312,6 +314,45 @@ public sealed class AnalysisRunService
         return side == SignalSides.Buy
             ? latest.High > last2High
             : latest.Low < last2Low;
+    }
+
+    private async Task RefreshSectorDailyBarsFromQuotesAsync(
+        DateOnly asOf, IReadOnlyList<AngelTokenRow> sectorTokens, CancellationToken ct)
+    {
+        if (sectorTokens.Count == 0)
+            return;
+
+        await _angel.EnsureSessionAsync(ct);
+        var exchangeTokens = sectorTokens
+            .GroupBy(t => t.Exchange)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<string>)g.Select(x => x.SymbolToken).Distinct().ToList());
+
+        var quotes = await _angel.GetQuotesAsync(QuoteModes.Full, exchangeTokens, ct);
+        var byToken = quotes.ToDictionary(q => (q.Exchange, q.SymbolToken), q => q);
+        var updated = 0;
+
+        foreach (var token in sectorTokens)
+        {
+            if (!byToken.TryGetValue((token.Exchange, token.SymbolToken), out var q))
+                continue;
+            if (q.Ltp is null || q.Open is null || q.High is null || q.Low is null || q.Close is null)
+                continue;
+
+            var open = q.Open.Value;
+            var high = q.High.Value;
+            var low = q.Low.Value;
+            var close = q.Ltp.Value;
+            high = Math.Max(high, Math.Max(open, close));
+            low = Math.Min(low, Math.Min(open, close));
+
+            await _market.UpsertMarketBarAsync(
+                token.InstrumentId, asOf, open, high, low, close, q.TradeVolume ?? 0, ct);
+            updated++;
+        }
+
+        _logger.LogInformation("Refreshed today's OHLC for {Count} sector indexes.", updated);
     }
 
     /// <summary>

@@ -42,7 +42,7 @@ export const DataFactory = {
         liquiditySignals(runId: $runId) {
           id liquidityRunId instrumentId appSymbol instrumentName side
           entryPrice initialStopLoss targetT1 targetT2 targetT3
-          relativeVolume rvolPercentile rvolOk strongClose
+          relativeVolume rvolPercentile rvolOk strongClose sectorConfirmed
           sweepSide sweptZoneType sweptZonePrice
           nearestZoneType nearestZonePrice distancePct timeframeContext
         }

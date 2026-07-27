@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using StockYouNeed.Application.Abstractions;
+using StockYouNeed.Application.Options;
 using StockYouNeed.Domain;
 
 namespace StockYouNeed.Application.Services;
@@ -21,23 +23,38 @@ public sealed class LiquidityAnalysisService
     private const int Min1hBars = 45;
     private const int Min4hBars = 8;
 
+    private readonly IAngelMarketDataClient _angel;
     private readonly IInstrumentRepository _instruments;
     private readonly IMarketDataRepository _market;
     private readonly IPortfolioRepository _portfolio;
     private readonly IntradayBarsSyncService _intradaySync;
+    private readonly MarketBarsSyncService _barsSync;
+    private readonly TokenSyncService _tokenSync;
+    private readonly UniverseSeedService _universeSeed;
+    private readonly AngelOptions _options;
     private readonly ILogger<LiquidityAnalysisService> _logger;
 
     public LiquidityAnalysisService(
+        IAngelMarketDataClient angel,
         IInstrumentRepository instruments,
         IMarketDataRepository market,
         IPortfolioRepository portfolio,
         IntradayBarsSyncService intradaySync,
+        MarketBarsSyncService barsSync,
+        TokenSyncService tokenSync,
+        UniverseSeedService universeSeed,
+        IOptions<AngelOptions> options,
         ILogger<LiquidityAnalysisService> logger)
     {
+        _angel = angel;
         _instruments = instruments;
         _market = market;
         _portfolio = portfolio;
         _intradaySync = intradaySync;
+        _barsSync = barsSync;
+        _tokenSync = tokenSync;
+        _universeSeed = universeSeed;
+        _options = options.Value;
         _logger = logger;
     }
 
@@ -57,6 +74,7 @@ public sealed class LiquidityAnalysisService
         {
             ["scanned"] = 0,
             ["signals"] = 0,
+            ["sectorConfirmed"] = 0,
             ["fewIntradayBars"] = 0,
             ["noSetup"] = 0,
             ["intradayBarsUpserted"] = 0
@@ -66,6 +84,41 @@ public sealed class LiquidityAnalysisService
         {
             var upserted = await _intradaySync.SyncUniverseHourlyAsync(ct);
             stats["intradayBarsUpserted"] = upserted;
+
+            // Same sector direction check as AnalysisRunService / Signals page
+            // (sector index breaks last 2 sessions high/low). Always computed; UI filters.
+            var sectorBarsCache = new Dictionary<Guid, List<MarketBarRow>>();
+            try
+            {
+                await _universeSeed.SeedAsync(ct);
+                if (_options.Enabled)
+                {
+                    var sectorTokens = await _instruments.GetActiveTokensForSectorsAsync(ct);
+                    if (sectorTokens.Count == 0)
+                        await _tokenSync.SyncUniverseTokensAsync(ct);
+                    await _barsSync.SyncMissingSectorBarsAsync(ct);
+                    // Refresh today's sector OHLC so direction check matches live Signals runs.
+                    await RefreshSectorDailyBarsFromQuotesAsync(asOf, ct);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Sector prep failed — sectorConfirmed may be false for many liquidity rows.");
+            }
+
+            var sectorIds = await _instruments.GetSectorInstrumentIdsAsync(ct);
+            foreach (var sectorId in sectorIds)
+            {
+                var sBars = (await _market.GetBarsForInstrumentAsync(sectorId, 10, ct))
+                    .OrderByDescending(b => b.TradeDate)
+                    .ToList();
+                if (sBars.Count >= 3)
+                    sectorBarsCache[sectorId] = sBars;
+            }
+
+            _logger.LogInformation(
+                "Liquidity sector evidence: {SectorIds} sectors, {WithBars} with bars.",
+                sectorIds.Count, sectorBarsCache.Count);
 
             var tokens = await _instruments.GetActiveTokensForUniversesAsync(ct);
             var watchIds = includeWatchlist
@@ -79,6 +132,7 @@ public sealed class LiquidityAnalysisService
             var signals = 0;
             var fewBars = 0;
             var noSetup = 0;
+            var sectorConfirmedCount = 0;
 
             foreach (var token in tokens)
             {
@@ -114,20 +168,34 @@ public sealed class LiquidityAnalysisService
                     continue;
                 }
 
+                var sectorId = await _instruments.GetSectorIdForInstrumentAsync(token.InstrumentId, ct);
+                if (sectorId is not null && sectorBarsCache.TryGetValue(sectorId.Value, out var sectorBars))
+                {
+                    signal.SectorConfirmed = CheckSectorConfirmation(signal.Side, sectorBars);
+                }
+                else
+                {
+                    signal.SectorConfirmed = false;
+                }
+
+                if (signal.SectorConfirmed)
+                    sectorConfirmedCount++;
+
                 await _portfolio.InsertLiquiditySignalAsync(signal, ct);
                 signals++;
             }
 
             stats["scanned"] = scanned;
             stats["signals"] = signals;
+            stats["sectorConfirmed"] = sectorConfirmedCount;
             stats["fewIntradayBars"] = fewBars;
             stats["noSetup"] = noSetup;
             _ = watchIds; // reserved for future universe narrowing
 
             await _portfolio.CompleteLiquidityAnalysisRunAsync(runId, "succeeded", null, stats, ct);
             _logger.LogInformation(
-                "Liquidity run {RunId}: scanned={Scanned}, signals={Signals}, fewBars={Few}, noSetup={No}",
-                runId, scanned, signals, fewBars, noSetup);
+                "Liquidity run {RunId}: scanned={Scanned}, signals={Signals}, sectorConfirmed={SectorConfirmed}, fewBars={Few}, noSetup={No}",
+                runId, scanned, signals, sectorConfirmedCount, fewBars, noSetup);
 
             return new AnalysisRunRow
             {
@@ -231,6 +299,7 @@ public sealed class LiquidityAnalysisService
                 RvolPercentile = Math.Round((decimal)rvolPctile, 4),
                 RvolOk = true,
                 StrongClose = true,
+                SectorConfirmed = false, // overwritten after Evaluate
                 SweepSide = side,
                 SweptZoneType = sweep.ZoneType,
                 SweptZonePrice = RoundPrice(sweep.ZonePrice),
@@ -245,6 +314,65 @@ public sealed class LiquidityAnalysisService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Upsert today's OHLC for sector indexes from Angel FULL quotes
+    /// (same idea as AnalysisRunService live equity bars — keeps sector direction check current).
+    /// </summary>
+    private async Task RefreshSectorDailyBarsFromQuotesAsync(DateOnly asOf, CancellationToken ct)
+    {
+        var sectorTokens = await _instruments.GetActiveTokensForSectorsAsync(ct);
+        if (sectorTokens.Count == 0)
+            return;
+
+        await _angel.EnsureSessionAsync(ct);
+        var exchangeTokens = sectorTokens
+            .GroupBy(t => t.Exchange)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<string>)g.Select(x => x.SymbolToken).Distinct().ToList());
+
+        var quotes = await _angel.GetQuotesAsync(QuoteModes.Full, exchangeTokens, ct);
+        var byToken = quotes.ToDictionary(q => (q.Exchange, q.SymbolToken), q => q);
+        var updated = 0;
+
+        foreach (var token in sectorTokens)
+        {
+            if (!byToken.TryGetValue((token.Exchange, token.SymbolToken), out var q))
+                continue;
+            if (q.Ltp is null || q.Open is null || q.High is null || q.Low is null || q.Close is null)
+                continue;
+
+            var open = q.Open.Value;
+            var high = q.High.Value;
+            var low = q.Low.Value;
+            var close = q.Ltp.Value;
+            high = Math.Max(high, Math.Max(open, close));
+            low = Math.Min(low, Math.Min(open, close));
+
+            await _market.UpsertMarketBarAsync(
+                token.InstrumentId, asOf, open, high, low, close, q.TradeVolume ?? 0, ct);
+            updated++;
+        }
+
+        _logger.LogInformation("Refreshed today's OHLC for {Count} sector indexes.", updated);
+    }
+
+    /// <summary>Sector confirmation: sector index must also break last 2 sessions' high/low (no volume required). Same rule as Signals / AnalysisRunService.</summary>
+    private static bool CheckSectorConfirmation(string side, List<MarketBarRow> sectorBarsDesc)
+    {
+        if (sectorBarsDesc.Count < 3)
+            return true; // not enough data — pass through
+
+        var latest = sectorBarsDesc[0];
+        var prev = sectorBarsDesc.Skip(1).Take(2).ToList();
+        var last2High = prev.Max(b => b.High);
+        var last2Low = prev.Min(b => b.Low);
+
+        return side == SignalSides.Buy
+            ? latest.High > last2High
+            : latest.Low < last2Low;
     }
 
     private static (decimal rvol, double percentile, bool ok) ComputeRvol(

@@ -40,6 +40,7 @@ export type LiquiditySignal = {
   rvolPercentile: number;
   rvolOk: boolean;
   strongClose: boolean;
+  sectorConfirmed: boolean;
   sweepSide?: string | null;
   sweptZoneType?: string | null;
   sweptZonePrice?: number | null;

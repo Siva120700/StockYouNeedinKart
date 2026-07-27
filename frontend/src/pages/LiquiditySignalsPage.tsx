@@ -73,6 +73,7 @@ const liquidityExportColumns: ExportColumn<ScoredLiquiditySignal>[] = [
     },
   },
   { header: "Strong", value: (r) => (r.strongClose ? "Yes" : "No") },
+  { header: "Sector", value: (r) => (r.sectorConfirmed ? "Yes" : "No") },
 ];
 
 export default function LiquiditySignalsPage() {
@@ -81,6 +82,7 @@ export default function LiquiditySignalsPage() {
   const [rows, setRows] = useState<LiquiditySignal[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [sectorCheck, setSectorCheck] = useState(false);
   const [riskRewardCheck, setRiskRewardCheck] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -177,6 +179,7 @@ export default function LiquiditySignalsPage() {
       ...r,
       score: liquidityScore(r),
     }));
+    if (sectorCheck) list = list.filter((r) => r.sectorConfirmed);
     if (riskRewardCheck) {
       list = list.filter((r) => {
         const rr = riskRewardRatio(r);
@@ -184,7 +187,7 @@ export default function LiquiditySignalsPage() {
       });
     }
     return list.sort((a, b) => b.score - a.score);
-  }, [rows, riskRewardCheck]);
+  }, [rows, sectorCheck, riskRewardCheck]);
 
   function onExportPdf() {
     downloadPdfTable({
@@ -216,6 +219,17 @@ export default function LiquiditySignalsPage() {
     const exportDisabled = loading || visibleRows.length === 0;
     setPageActions(
       <MuiStack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={sectorCheck}
+              onChange={(e) => setSectorCheck(e.target.checked)}
+            />
+          }
+          label="Sector check"
+          sx={{ mr: 1 }}
+        />
         <FormControlLabel
           control={
             <Switch
@@ -257,7 +271,7 @@ export default function LiquiditySignalsPage() {
       </MuiStack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, loading, riskRewardCheck, visibleRows]);
+  }, [running, loading, sectorCheck, riskRewardCheck, visibleRows]);
 
   const columns = useMemo(() => {
     type Scored = LiquiditySignal & { score: number };
@@ -378,8 +392,8 @@ export default function LiquiditySignalsPage() {
         getRowId={(r) => r.id}
         loading={loading}
         emptyMessage={
-          riskRewardCheck
-            ? "No liquidity signals match R:R ≥ 1. Turn the filter off, or Run liquidity again."
+          sectorCheck || riskRewardCheck
+            ? "No liquidity signals match the active filters. Turn filters off, or Run liquidity again."
             : "No liquidity signals. Click Run liquidity (needs 1H bars + 4H sweep + 1H confirm)."
         }
       />

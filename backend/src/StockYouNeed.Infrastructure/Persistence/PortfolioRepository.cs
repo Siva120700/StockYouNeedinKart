@@ -390,14 +390,14 @@ public sealed class PortfolioRepository : IPortfolioRepository
             INSERT INTO liquidity_signals (
               id, liquidity_run_id, user_id, instrument_id, side, as_of_date,
               entry_price, initial_stop_loss, target_t1, target_t2, target_t3,
-              relative_volume, rvol_percentile, rvol_ok, strong_close,
+              relative_volume, rvol_percentile, rvol_ok, strong_close, sector_confirmed,
               sweep_side, swept_zone_type, swept_zone_price,
               nearest_zone_type, nearest_zone_price, distance_pct,
               zone_tags, timeframe_context)
             VALUES (
               @Id, @LiquidityRunId, @UserId, @InstrumentId, @Side::signal_side, @AsOfDate,
               @EntryPrice, @InitialStopLoss, @TargetT1, @TargetT2, @TargetT3,
-              @RelativeVolume, @RvolPercentile, @RvolOk, @StrongClose,
+              @RelativeVolume, @RvolPercentile, @RvolOk, @StrongClose, @SectorConfirmed,
               @SweepSide, @SweptZoneType, @SweptZonePrice,
               @NearestZoneType, @NearestZonePrice, @DistancePct,
               @ZoneTags, @TimeframeContext)
@@ -428,6 +428,7 @@ public sealed class PortfolioRepository : IPortfolioRepository
               s.rvol_percentile AS RvolPercentile,
               s.rvol_ok AS RvolOk,
               s.strong_close AS StrongClose,
+              s.sector_confirmed AS SectorConfirmed,
               s.sweep_side AS SweepSide,
               s.swept_zone_type AS SweptZoneType,
               s.swept_zone_price AS SweptZonePrice,
@@ -482,6 +483,7 @@ public sealed class PortfolioRepository : IPortfolioRepository
               s.rvol_percentile AS RvolPercentile,
               s.rvol_ok AS RvolOk,
               s.strong_close AS StrongClose,
+              s.sector_confirmed AS SectorConfirmed,
               s.sweep_side AS SweepSide,
               s.swept_zone_type AS SweptZoneType,
               s.swept_zone_price AS SweptZonePrice,
