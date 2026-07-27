@@ -13,6 +13,7 @@ public static class DependencyInjection
         services.AddScoped<LtpPollService>();
         services.AddScoped<AnalysisRunService>();
         services.AddScoped<LiquidityAnalysisService>();
+        services.AddScoped<BacktestService>();
         services.AddScoped<UniverseSeedService>();
         return services;
     }

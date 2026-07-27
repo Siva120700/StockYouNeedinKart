@@ -10,8 +10,9 @@ namespace StockYouNeed.Application.Services;
 public sealed class IntradayBarsSyncService
 {
     public const string Interval1h = "1h";
-    private const int MinBarsToSkip = 80;
     private const int LookbackSessions = 15;
+    /// <summary>Skip Angel fetch only when latest 1H bar is newer than this (avoids stale liquidity).</summary>
+    private static readonly TimeSpan MaxStale = TimeSpan.FromHours(3);
 
     private readonly IAngelMarketDataClient _angel;
     private readonly IInstrumentRepository _instruments;
@@ -33,7 +34,10 @@ public sealed class IntradayBarsSyncService
         _logger = logger;
     }
 
-    /// <summary>Ensure universe equities have enough 1H history. Skips symbols that already have enough bars.</summary>
+    /// <summary>
+    /// Refresh 1H bars for universe equities. Skips a symbol only when its latest bar is fresh
+    /// (within <see cref="MaxStale"/>). Older caches are always topped up from Angel.
+    /// </summary>
     public async Task<int> SyncUniverseHourlyAsync(CancellationToken ct = default, bool force = false)
     {
         if (!_angelOptions.Enabled)
@@ -51,19 +55,34 @@ public sealed class IntradayBarsSyncService
         }
 
         var toIst = DateTime.Now;
-        var fromIst = toIst.Date.AddDays(-(LookbackSessions * 2 + 5));
+        var fullFromIst = toIst.Date.AddDays(-(LookbackSessions * 2 + 5));
+        var nowUtc = DateTimeOffset.UtcNow;
         var upserted = 0;
+        var skippedFresh = 0;
+        var refreshed = 0;
 
         foreach (var token in tokens)
         {
             ct.ThrowIfCancellationRequested();
             try
             {
-                if (!force)
+                var latest = await _market.GetLatestIntradayBarTimeAsync(
+                    token.InstrumentId, Interval1h, ct);
+
+                if (!force && latest is not null && nowUtc - latest.Value <= MaxStale)
                 {
-                    var existing = await _market.CountIntradayBarsAsync(token.InstrumentId, Interval1h, ct);
-                    if (existing >= MinBarsToSkip)
-                        continue;
+                    skippedFresh++;
+                    continue;
+                }
+
+                // Incremental: from day before last bar (overlap) when we already have history.
+                var fromIst = fullFromIst;
+                if (latest is not null && !force)
+                {
+                    var latestIst = latest.Value.ToOffset(TimeSpan.FromHours(5.5)).DateTime;
+                    fromIst = latestIst.AddDays(-1);
+                    if (fromIst < fullFromIst)
+                        fromIst = fullFromIst;
                 }
 
                 var candles = await _angel.GetHourlyCandlesAsync(
@@ -81,6 +100,8 @@ public sealed class IntradayBarsSyncService
                         ct);
                     upserted++;
                 }
+
+                refreshed++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -90,7 +111,9 @@ public sealed class IntradayBarsSyncService
             await Task.Delay(900, ct);
         }
 
-        _logger.LogInformation("Intraday 1H sync upserted {Count} bars across universe.", upserted);
+        _logger.LogInformation(
+            "Intraday 1H sync upserted {Count} bars (refreshed={Refreshed}, skippedFresh={Skipped}).",
+            upserted, refreshed, skippedFresh);
         return upserted;
     }
 }

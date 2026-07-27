@@ -1,13 +1,23 @@
 import type {
   AnalysisRun,
+  BacktestNote,
+  BacktestNoteInput,
+  BacktestSymbolSummary,
   LiquiditySignal,
   LtpQuote,
   OpenPosition,
   Signal,
+  UniverseInstrument,
   User,
   WatchlistItem,
 } from "./types";
 import { gql } from "./client";
+
+const BACKTEST_NOTE_FIELDS = `
+  id instrumentId appSymbol instrumentName strategy side signalDate
+  entryPrice initialStopLoss targetT1 targetT2 targetT3
+  result targetLevel targetHitPct exitPrice exitDate pnlPct rMultiple notes wouldTakeLive source
+`;
 
 /** Factory methods — frontend only fetches / triggers; no market math here. */
 export const DataFactory = {
@@ -21,6 +31,13 @@ export const DataFactory = {
       { ltp { instrumentId appSymbol instrumentName exchange ltp fetchedAt } }
     `);
     return data.ltp;
+  },
+
+  async universes(): Promise<UniverseInstrument[]> {
+    const data = await gql<{ universes: UniverseInstrument[] }>(`
+      { universes { id symbol name } }
+    `);
+    return data.universes;
   },
 
   async signals(runId?: string): Promise<Signal[]> {
@@ -69,6 +86,32 @@ export const DataFactory = {
       { watchlist { instrumentId symbol name } }
     `);
     return data.watchlist;
+  },
+
+  async backtestNotes(instrumentId?: string, strategy?: string | null): Promise<BacktestNote[]> {
+    const data = await gql<{ backtestNotes: BacktestNote[] }>(
+      `query ($instrumentId: UUID, $strategy: String) {
+        backtestNotes(instrumentId: $instrumentId, strategy: $strategy) {
+          ${BACKTEST_NOTE_FIELDS}
+        }
+      }`,
+      { instrumentId: instrumentId ?? null, strategy: strategy ?? null },
+    );
+    return data.backtestNotes;
+  },
+
+  async backtestSummary(instrumentId: string, strategy?: string | null): Promise<BacktestSymbolSummary> {
+    const data = await gql<{ backtestSummary: BacktestSymbolSummary }>(
+      `query ($instrumentId: UUID!, $strategy: String) {
+        backtestSummary(instrumentId: $instrumentId, strategy: $strategy) {
+          instrumentId appSymbol instrumentName strategyFilter
+          timesInStrategy targetHits slHits skipped openCount
+          targetHitRatePct avgTargetHitPct
+        }
+      }`,
+      { instrumentId, strategy: strategy ?? null },
+    );
+    return data.backtestSummary;
   },
 };
 
@@ -137,5 +180,42 @@ export const ActionFactory = {
   async refreshLtp(): Promise<number> {
     const data = await gql<{ refreshLtp: number }>(`mutation { refreshLtp }`);
     return data.refreshLtp;
+  },
+
+  async upsertBacktestNote(input: BacktestNoteInput): Promise<BacktestNote> {
+    const data = await gql<{ upsertBacktestNote: BacktestNote }>(
+      `mutation ($input: BacktestNoteInput!) {
+        upsertBacktestNote(input: $input) {
+          ${BACKTEST_NOTE_FIELDS}
+        }
+      }`,
+      { input },
+    );
+    return data.upsertBacktestNote;
+  },
+
+  async deleteBacktestNote(noteId: string): Promise<boolean> {
+    const data = await gql<{ deleteBacktestNote: boolean }>(
+      `mutation ($noteId: UUID!) { deleteBacktestNote(noteId: $noteId) }`,
+      { noteId },
+    );
+    return data.deleteBacktestNote;
+  },
+
+  async runHistoricalBacktest(
+    instrumentId: string,
+    strategy: string,
+  ): Promise<BacktestSymbolSummary> {
+    const data = await gql<{ runHistoricalBacktest: BacktestSymbolSummary }>(
+      `mutation ($instrumentId: UUID!, $strategy: String!) {
+        runHistoricalBacktest(instrumentId: $instrumentId, strategy: $strategy) {
+          instrumentId appSymbol instrumentName strategyFilter
+          timesInStrategy targetHits slHits skipped openCount
+          targetHitRatePct avgTargetHitPct
+        }
+      }`,
+      { instrumentId, strategy },
+    );
+    return data.runHistoricalBacktest;
   },
 };

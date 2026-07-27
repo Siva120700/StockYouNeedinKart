@@ -178,3 +178,49 @@ public sealed class UserRow
     public string Email { get; set; } = "";
     public string? DisplayName { get; set; }
 }
+
+/// <summary>Manual backtest journal entry — isolated from live signal engines.</summary>
+public sealed class BacktestNoteRow
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string InstrumentName { get; set; } = "";
+    public string Strategy { get; set; } = "signals";
+    public string Side { get; set; } = "buy";
+    public DateOnly SignalDate { get; set; }
+    public decimal EntryPrice { get; set; }
+    public decimal InitialStopLoss { get; set; }
+    public decimal? TargetT1 { get; set; }
+    public decimal? TargetT2 { get; set; }
+    public decimal? TargetT3 { get; set; }
+    public string Result { get; set; } = "open";
+    public string? TargetLevel { get; set; }
+    public decimal? TargetHitPct { get; set; }
+    public decimal? ExitPrice { get; set; }
+    public DateOnly? ExitDate { get; set; }
+    public decimal? PnlPct { get; set; }
+    public decimal? RMultiple { get; set; }
+    public string Notes { get; set; } = "";
+    public bool? WouldTakeLive { get; set; }
+    public string Source { get; set; } = "manual";
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>Aggregated backtest stats for one symbol (and optional strategy filter).</summary>
+public sealed class BacktestSymbolSummary
+{
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string InstrumentName { get; set; } = "";
+    public string? StrategyFilter { get; set; }
+    public int TimesInStrategy { get; set; }
+    public int TargetHits { get; set; }
+    public int SlHits { get; set; }
+    public int Skipped { get; set; }
+    public int OpenCount { get; set; }
+    public decimal? TargetHitRatePct { get; set; }
+    public decimal? AvgTargetHitPct { get; set; }
+}

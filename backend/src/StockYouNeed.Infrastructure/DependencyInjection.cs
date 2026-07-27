@@ -27,6 +27,7 @@ public static class DependencyInjection
         services.AddScoped<IInstrumentRepository, InstrumentRepository>();
         services.AddScoped<IMarketDataRepository, MarketDataRepository>();
         services.AddScoped<IPortfolioRepository, PortfolioRepository>();
+        services.AddScoped<IBacktestRepository, BacktestRepository>();
         services.AddSingleton<DatabaseMigrator>();
 
         return services;

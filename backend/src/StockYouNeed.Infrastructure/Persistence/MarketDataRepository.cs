@@ -245,6 +245,31 @@ public sealed class MarketDataRepository : IMarketDataRepository
             new CommandDefinition(sql, new { instrumentId, interval }, cancellationToken: ct));
     }
 
+    public async Task<DateTimeOffset?> GetLatestIntradayBarTimeAsync(
+        Guid instrumentId, string interval, CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT bar_time FROM market_intraday_bars
+            WHERE instrument_id = @instrumentId AND interval = @interval
+            ORDER BY bar_time DESC
+            LIMIT 1
+            """;
+        using var conn = _db.CreateConnection();
+        // Npgsql often returns timestamptz as DateTime via ExecuteScalar — not DateTimeOffset.
+        var raw = await conn.ExecuteScalarAsync<object>(
+            new CommandDefinition(sql, new { instrumentId, interval }, cancellationToken: ct));
+        if (raw is null or DBNull)
+            return null;
+        return raw switch
+        {
+            DateTimeOffset dto => dto,
+            DateTime dt when dt.Kind == DateTimeKind.Utc => new DateTimeOffset(dt),
+            DateTime dt when dt.Kind == DateTimeKind.Local => new DateTimeOffset(dt),
+            DateTime dt => new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc)),
+            _ => throw new InvalidCastException($"Unexpected bar_time type: {raw.GetType().FullName}")
+        };
+    }
+
     public async Task LogQuoteFetchBatchAsync(
         string mode, int requested, int fetched, int unfetched, bool statusOk,
         string? message, string? errorCode, string exchangeTokensJson, string unfetchedJson,

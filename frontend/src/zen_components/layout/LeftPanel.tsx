@@ -13,6 +13,7 @@ import {
   ChartLine,
   Drop,
   ListChecks,
+  Notebook,
   Pulse,
   SidebarSimple,
 } from "@phosphor-icons/react";
@@ -23,6 +24,7 @@ const navItems = [
   { to: "/ltp", label: "Live LTP", icon: Pulse },
   { to: "/signals", label: "Signals", icon: ChartLine },
   { to: "/liquidity", label: "Liquidity", icon: Drop },
+  { to: "/backtest", label: "Backtest", icon: Notebook },
   { to: "/positions", label: "Positions", icon: ListChecks },
 ];
 

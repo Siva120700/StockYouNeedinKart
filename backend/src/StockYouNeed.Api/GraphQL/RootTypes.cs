@@ -57,6 +57,29 @@ public sealed class Query
         [Service] IPortfolioRepository portfolio,
         CancellationToken ct)
         => await portfolio.GetWatchlistAsync(user.UserId, ct);
+
+    public async Task<IReadOnlyList<BacktestNoteRow>> BacktestNotes(
+        Guid? instrumentId,
+        string? strategy,
+        [Service] ICurrentUserAccessor user,
+        [Service] IBacktestRepository backtest,
+        CancellationToken ct)
+        => await backtest.GetNotesAsync(user.UserId, instrumentId, NormalizeStrategy(strategy), ct);
+
+    public async Task<BacktestSymbolSummary> BacktestSummary(
+        Guid instrumentId,
+        string? strategy,
+        [Service] ICurrentUserAccessor user,
+        [Service] IBacktestRepository backtest,
+        CancellationToken ct)
+        => await backtest.GetSymbolSummaryAsync(user.UserId, instrumentId, NormalizeStrategy(strategy), ct);
+
+    private static string? NormalizeStrategy(string? strategy)
+    {
+        if (string.IsNullOrWhiteSpace(strategy)) return null;
+        var s = strategy.Trim().ToLowerInvariant();
+        return s is "signals" or "liquidity" ? s : null;
+    }
 }
 
 public sealed class Mutation
@@ -160,4 +183,75 @@ public sealed class Mutation
         [Service] LtpPollService poller,
         CancellationToken ct)
         => await poller.PollOnceAsync(ct);
+
+    public async Task<BacktestNoteRow> UpsertBacktestNote(
+        BacktestNoteInput input,
+        [Service] ICurrentUserAccessor user,
+        [Service] IBacktestRepository backtest,
+        CancellationToken ct)
+    {
+        var note = new BacktestNoteRow
+        {
+            Id = input.Id ?? Guid.Empty,
+            UserId = user.UserId,
+            InstrumentId = input.InstrumentId,
+            Strategy = input.Strategy,
+            Side = input.Side,
+            SignalDate = input.SignalDate,
+            EntryPrice = input.EntryPrice,
+            InitialStopLoss = input.InitialStopLoss,
+            TargetT1 = input.TargetT1,
+            TargetT2 = input.TargetT2,
+            TargetT3 = input.TargetT3,
+            Result = input.Result,
+            TargetLevel = input.TargetLevel,
+            TargetHitPct = input.TargetHitPct,
+            ExitPrice = input.ExitPrice,
+            ExitDate = input.ExitDate,
+            PnlPct = input.PnlPct,
+            RMultiple = input.RMultiple,
+            Notes = input.Notes ?? "",
+            WouldTakeLive = input.WouldTakeLive,
+            Source = "manual",
+        };
+        return await backtest.UpsertNoteAsync(note, ct);
+    }
+
+    public async Task<bool> DeleteBacktestNote(
+        Guid noteId,
+        [Service] ICurrentUserAccessor user,
+        [Service] IBacktestRepository backtest,
+        CancellationToken ct)
+        => await backtest.DeleteNoteAsync(user.UserId, noteId, ct);
+
+    public async Task<BacktestSymbolSummary> RunHistoricalBacktest(
+        Guid instrumentId,
+        string strategy,
+        [Service] ICurrentUserAccessor user,
+        [Service] BacktestService backtest,
+        CancellationToken ct)
+        => await backtest.RunHistoricalAsync(user.UserId, instrumentId, strategy, ct);
+}
+
+public sealed class BacktestNoteInput
+{
+    public Guid? Id { get; set; }
+    public Guid InstrumentId { get; set; }
+    public string Strategy { get; set; } = "signals";
+    public string Side { get; set; } = "buy";
+    public DateOnly SignalDate { get; set; }
+    public decimal EntryPrice { get; set; }
+    public decimal InitialStopLoss { get; set; }
+    public decimal? TargetT1 { get; set; }
+    public decimal? TargetT2 { get; set; }
+    public decimal? TargetT3 { get; set; }
+    public string Result { get; set; } = "open";
+    public string? TargetLevel { get; set; }
+    public decimal? TargetHitPct { get; set; }
+    public decimal? ExitPrice { get; set; }
+    public DateOnly? ExitDate { get; set; }
+    public decimal? PnlPct { get; set; }
+    public decimal? RMultiple { get; set; }
+    public string? Notes { get; set; }
+    public bool? WouldTakeLive { get; set; }
 }

@@ -5,6 +5,7 @@ import { ZenPrimaryLayoutProvider } from "./zen_components/layout/ZenPrimaryLayo
 import LtpPage from "./pages/LtpPage";
 import SignalsPage from "./pages/SignalsPage";
 import LiquiditySignalsPage from "./pages/LiquiditySignalsPage";
+import BacktestPage from "./pages/BacktestPage";
 import PositionsPage from "./pages/PositionsPage";
 
 const theme = createTheme({
@@ -32,6 +33,7 @@ export default function App() {
               <Route path="/ltp" element={<LtpPage />} />
               <Route path="/signals" element={<SignalsPage />} />
               <Route path="/liquidity" element={<LiquiditySignalsPage />} />
+              <Route path="/backtest" element={<BacktestPage />} />
               <Route path="/positions" element={<PositionsPage />} />
             </Routes>
           </ZenPrimaryLayout>

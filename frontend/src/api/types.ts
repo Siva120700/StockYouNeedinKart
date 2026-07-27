@@ -79,3 +79,70 @@ export type AnalysisRun = {
   status: string;
   asOfDate: string;
 };
+
+export type UniverseInstrument = {
+  id: string;
+  symbol: string;
+  name: string;
+};
+
+export type BacktestNote = {
+  id: string;
+  instrumentId: string;
+  appSymbol: string;
+  instrumentName: string;
+  strategy: string;
+  side: string;
+  signalDate: string;
+  entryPrice: number;
+  initialStopLoss: number;
+  targetT1?: number | null;
+  targetT2?: number | null;
+  targetT3?: number | null;
+  result: string;
+  targetLevel?: string | null;
+  targetHitPct?: number | null;
+  exitPrice?: number | null;
+  exitDate?: string | null;
+  pnlPct?: number | null;
+  rMultiple?: number | null;
+  notes: string;
+  wouldTakeLive?: boolean | null;
+  source?: string | null;
+};
+
+export type BacktestSymbolSummary = {
+  instrumentId: string;
+  appSymbol: string;
+  instrumentName: string;
+  strategyFilter?: string | null;
+  timesInStrategy: number;
+  targetHits: number;
+  slHits: number;
+  skipped: number;
+  openCount: number;
+  targetHitRatePct?: number | null;
+  avgTargetHitPct?: number | null;
+};
+
+export type BacktestNoteInput = {
+  id?: string | null;
+  instrumentId: string;
+  strategy: string;
+  side: string;
+  signalDate: string;
+  entryPrice: number;
+  initialStopLoss: number;
+  targetT1?: number | null;
+  targetT2?: number | null;
+  targetT3?: number | null;
+  result: string;
+  targetLevel?: string | null;
+  targetHitPct?: number | null;
+  exitPrice?: number | null;
+  exitDate?: string | null;
+  pnlPct?: number | null;
+  rMultiple?: number | null;
+  notes?: string | null;
+  wouldTakeLive?: boolean | null;
+};

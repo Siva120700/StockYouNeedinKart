@@ -101,6 +101,7 @@ public interface IMarketDataRepository
     Task<IReadOnlyList<MarketBarRow>> GetBarsForInstrumentAsync(Guid instrumentId, int limitDays, CancellationToken ct = default);
     Task<IReadOnlyList<MarketIntradayBarRow>> GetIntradayBarsForInstrumentAsync(Guid instrumentId, string interval, int limitBars, CancellationToken ct = default);
     Task<int> CountIntradayBarsAsync(Guid instrumentId, string interval, CancellationToken ct = default);
+    Task<DateTimeOffset?> GetLatestIntradayBarTimeAsync(Guid instrumentId, string interval, CancellationToken ct = default);
     Task LogQuoteFetchBatchAsync(string mode, int requested, int fetched, int unfetched, bool statusOk, string? message, string? errorCode, string exchangeTokensJson, string unfetchedJson, Guid? analysisRunId, int? durationMs, CancellationToken ct = default);
 }
 
@@ -127,6 +128,23 @@ public interface IPortfolioRepository
     Task ClosePositionAsync(Guid userId, Guid positionId, decimal exitPrice, string closeReason, CancellationToken ct = default);
     Task RefreshPositionMarksFromLtpAsync(Guid userId, CancellationToken ct = default);
     Task<IReadOnlyList<Guid>> GetWatchlistInstrumentIdsAsync(Guid userId, CancellationToken ct = default);
+}
+
+public interface IBacktestRepository
+{
+    Task<IReadOnlyList<BacktestNoteRow>> GetNotesAsync(
+        Guid userId, Guid? instrumentId, string? strategy, CancellationToken ct = default);
+
+    Task<BacktestSymbolSummary> GetSymbolSummaryAsync(
+        Guid userId, Guid instrumentId, string? strategy, CancellationToken ct = default);
+
+    Task<BacktestNoteRow> UpsertNoteAsync(BacktestNoteRow note, CancellationToken ct = default);
+
+    Task<bool> DeleteNoteAsync(Guid userId, Guid noteId, CancellationToken ct = default);
+
+    Task DeleteAutoNotesAsync(Guid userId, Guid instrumentId, string strategy, CancellationToken ct = default);
+
+    Task InsertAutoNotesAsync(IReadOnlyList<BacktestNoteRow> notes, CancellationToken ct = default);
 }
 
 public interface ICurrentUserAccessor

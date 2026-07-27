@@ -158,7 +158,7 @@ public sealed class LiquidityAnalysisService
                 var daily = await _market.GetBarsForInstrumentAsync(token.InstrumentId, 10, ct);
                 ltpById.TryGetValue(token.InstrumentId, out var ltp);
 
-                var signal = Evaluate(
+                var signal = TryEvaluate(
                     userId, runId, asOf, token, bars1h, bars4h, daily.ToList(),
                     ltp > 0 ? ltp : null);
 
@@ -217,7 +217,8 @@ public sealed class LiquidityAnalysisService
         }
     }
 
-    private static LiquiditySignalRow? Evaluate(
+    /// <summary>Public for historical backtest replay — same rules as live liquidity run.</summary>
+    public static LiquiditySignalRow? TryEvaluate(
         Guid userId,
         Guid runId,
         DateOnly asOf,
