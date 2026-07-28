@@ -45,6 +45,12 @@ public sealed class Query
         CancellationToken ct)
         => await portfolio.GetLiquiditySignalsAsync(user.UserId, runId, ruleset ?? "classic", ct);
 
+    public async Task<IReadOnlyList<ConfluenceSignalRow>> ConfluenceSignals(
+        [Service] ICurrentUserAccessor user,
+        [Service] ConfluenceService confluence,
+        CancellationToken ct)
+        => await confluence.GetSignalsAsync(user.UserId, ct);
+
     public async Task<IReadOnlyList<OpenPositionRow>> OpenPositions(
         [Service] ICurrentUserAccessor user,
         [Service] IPortfolioRepository portfolio,
@@ -120,7 +126,7 @@ public sealed class Query
     {
         if (string.IsNullOrWhiteSpace(strategy)) return null;
         var s = strategy.Trim().ToLowerInvariant();
-        return s is "signals" or "liquidity" or "liquidity_fresh" ? s : null;
+        return s is "signals" or "liquidity" or "liquidity_fresh" or "confluence" ? s : null;
     }
 }
 
@@ -197,6 +203,16 @@ public sealed class Mutation
         CancellationToken ct)
         => await portfolio.OpenPositionFromLiquiditySignalAsync(
             user.UserId, signalId, quantityLots <= 0 ? 1 : quantityLots, ct);
+
+    public async Task<Guid> OpenPositionFromConfluence(
+        Guid liquiditySignalId,
+        Guid analysisSignalId,
+        int quantityLots,
+        [Service] ICurrentUserAccessor user,
+        [Service] IPortfolioRepository portfolio,
+        CancellationToken ct)
+        => await portfolio.OpenPositionFromConfluenceAsync(
+            user.UserId, liquiditySignalId, analysisSignalId, quantityLots <= 0 ? 1 : quantityLots, ct);
 
     public async Task<bool> UpdateStopLoss(
         Guid positionId,

@@ -33,7 +33,7 @@ import {
   type ExportColumn,
 } from "../utils/exportTable";
 
-type StrategyFilter = "all" | "signals" | "liquidity" | "liquidity_fresh";
+type StrategyFilter = "all" | "signals" | "liquidity" | "liquidity_fresh" | "confluence";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -64,6 +64,7 @@ function emptyForm(instrumentId: string): BacktestNoteInput {
 }
 
 function strategyLabel(strategy: string | null | undefined): string {
+  if (strategy === "confluence") return "Confluence";
   if (strategy === "liquidity_fresh") return "Liquidity Fresh";
   if (strategy === "liquidity") return "Liquidity";
   if (strategy === "signals") return "Signals";
@@ -74,11 +75,11 @@ function summaryRowId(row: BacktestSymbolSummary): string {
   return `${row.instrumentId}-${row.strategyFilter ?? "unknown"}`;
 }
 
-type BacktestStrategy = "signals" | "liquidity" | "liquidity_fresh";
+type BacktestStrategy = "signals" | "liquidity" | "liquidity_fresh" | "confluence";
 
 function strategiesForFilter(filter: StrategyFilter): readonly BacktestStrategy[] {
   return filter === "all"
-    ? (["signals", "liquidity", "liquidity_fresh"] as const)
+    ? (["signals", "liquidity", "liquidity_fresh", "confluence"] as const)
     : ([filter] as const);
 }
 
@@ -274,6 +275,7 @@ export default function BacktestPage() {
     return saved === "signals" ||
       saved === "liquidity" ||
       saved === "liquidity_fresh" ||
+      saved === "confluence" ||
       saved === "all"
       ? saved
       : "all";
@@ -560,6 +562,7 @@ export default function BacktestPage() {
               <MenuItem value="signals">Signals</MenuItem>
               <MenuItem value="liquidity">Liquidity</MenuItem>
               <MenuItem value="liquidity_fresh">Liquidity Fresh</MenuItem>
+              <MenuItem value="confluence">Confluence</MenuItem>
             </Select>
           </FormControl>
           <Autocomplete
@@ -748,6 +751,7 @@ export default function BacktestPage() {
                   <MenuItem value="signals">Signals</MenuItem>
                   <MenuItem value="liquidity">Liquidity</MenuItem>
                   <MenuItem value="liquidity_fresh">Liquidity Fresh</MenuItem>
+                  <MenuItem value="confluence">Confluence</MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" sx={{ minWidth: 100 }}>

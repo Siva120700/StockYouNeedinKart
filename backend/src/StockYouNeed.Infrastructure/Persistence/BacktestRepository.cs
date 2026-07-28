@@ -361,8 +361,8 @@ public sealed class BacktestRepository : IBacktestRepository
     private static void NormalizeNote(BacktestNoteRow note)
     {
         note.Strategy = note.Strategy.Trim().ToLowerInvariant();
-        if (note.Strategy is not ("signals" or "liquidity" or "liquidity_fresh"))
-            throw new ArgumentException("Strategy must be 'signals', 'liquidity', or 'liquidity_fresh'.");
+        if (note.Strategy is not ("signals" or "liquidity" or "liquidity_fresh" or "confluence"))
+            throw new ArgumentException("Strategy must be 'signals', 'liquidity', 'liquidity_fresh', or 'confluence'.");
 
         note.Side = note.Side.Trim().ToLowerInvariant();
         if (note.Side is not ("buy" or "sell"))

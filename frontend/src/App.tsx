@@ -5,6 +5,7 @@ import { ZenPrimaryLayoutProvider } from "./zen_components/layout/ZenPrimaryLayo
 import LtpPage from "./pages/LtpPage";
 import SignalsPage from "./pages/SignalsPage";
 import LiquiditySignalsPage from "./pages/LiquiditySignalsPage";
+import ConfluencePage from "./pages/ConfluencePage";
 import BacktestPage from "./pages/BacktestPage";
 import PositionsPage from "./pages/PositionsPage";
 
@@ -34,6 +35,7 @@ export default function App() {
               <Route path="/signals" element={<SignalsPage />} />
               <Route path="/liquidity" element={<LiquiditySignalsPage ruleset="classic" />} />
               <Route path="/liquidity-fresh" element={<LiquiditySignalsPage ruleset="fresh" />} />
+              <Route path="/confluence" element={<ConfluencePage />} />
               <Route path="/backtest" element={<BacktestPage />} />
               <Route path="/positions" element={<PositionsPage />} />
             </Routes>

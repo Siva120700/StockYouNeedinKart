@@ -34,6 +34,7 @@ public sealed class DatabaseMigrator
             Path.Combine(databaseRoot, "009_backtest_auto_notes.sql"),
             Path.Combine(databaseRoot, "010_liquidity_ruleset.sql"),
             Path.Combine(databaseRoot, "011_backtest_liquidity_fresh.sql"),
+            Path.Combine(databaseRoot, "012_backtest_confluence.sql"),
         };
 
         await using var conn = new NpgsqlConnection(_db.ConnectionString);

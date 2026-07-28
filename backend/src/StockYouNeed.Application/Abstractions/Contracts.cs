@@ -126,6 +126,8 @@ public interface IPortfolioRepository
         Guid userId, Guid? runId, string ruleset = "classic", CancellationToken ct = default);
     Task<LiquiditySignalRow?> GetLiquiditySignalAsync(Guid signalId, Guid userId, CancellationToken ct = default);
     Task<Guid> OpenPositionFromLiquiditySignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default);
+    Task<Guid> OpenPositionFromConfluenceAsync(
+        Guid userId, Guid liquiditySignalId, Guid analysisSignalId, int quantityLots, CancellationToken ct = default);
     Task<Guid> OpenPositionFromSignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default);
     Task UpdateStopLossAsync(Guid userId, Guid positionId, decimal newStop, CancellationToken ct = default);
     Task ClosePositionAsync(Guid userId, Guid positionId, decimal exitPrice, string closeReason, CancellationToken ct = default);

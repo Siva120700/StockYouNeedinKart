@@ -25,6 +25,7 @@ const navItems = [
   { to: "/signals", label: "Signals", icon: ChartLine },
   { to: "/liquidity", label: "Liquidity", icon: Drop },
   { to: "/liquidity-fresh", label: "Liquidity Fresh", icon: Drop },
+  { to: "/confluence", label: "Confluence", icon: ChartLine },
   { to: "/backtest", label: "Backtest", icon: Notebook },
   { to: "/positions", label: "Positions", icon: ListChecks },
 ];

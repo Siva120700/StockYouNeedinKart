@@ -145,6 +145,36 @@ public sealed class LiquiditySignalRow
     public string TimeframeContext { get; set; } = "4h_sweep+1h_confirm";
 }
 
+/// <summary>Signals + Liquidity Fresh overlap with combined entry/SL.</summary>
+public sealed class ConfluenceSignalRow
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string InstrumentName { get; set; } = "";
+    public string Side { get; set; } = "";
+    public DateOnly AsOfDate { get; set; }
+    public decimal EntryPrice { get; set; }
+    public decimal InitialStopLoss { get; set; }
+    public decimal? TargetT1 { get; set; }
+    public decimal? TargetT2 { get; set; }
+    public decimal? TargetT3 { get; set; }
+    public Guid AnalysisSignalId { get; set; }
+    public Guid LiquiditySignalId { get; set; }
+    public decimal SignalsEntry { get; set; }
+    public decimal LiquidityEntry { get; set; }
+    public decimal SignalsStopLoss { get; set; }
+    public decimal LiquidityStopLoss { get; set; }
+    public bool SectorConfirmed { get; set; }
+    public bool FreshCross { get; set; }
+    public decimal RelativeVolume { get; set; }
+    public decimal RvolPercentile { get; set; }
+    public bool StrongClose { get; set; }
+    public string? SweptZoneType { get; set; }
+    public string TimeframeContext { get; set; } = "signals+liquidity_fresh";
+}
+
 public sealed class OpenPositionRow
 {
     public Guid Id { get; set; }
