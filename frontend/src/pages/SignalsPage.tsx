@@ -300,6 +300,8 @@ export default function SignalsPage() {
         rows={visibleRows}
         getRowId={(r) => r.id}
         loading={loading}
+        enableSearch
+        searchPlaceholder="Search symbol or name…"
         emptyMessage={
           sectorCheck || riskRewardCheck || freshCrossCheck
             ? "No signals match the active filters. Turn filters off, or Run analysis again."

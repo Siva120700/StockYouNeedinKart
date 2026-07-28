@@ -125,6 +125,8 @@ export default function LtpPage() {
         rows={rows}
         getRowId={(r) => r.instrumentId}
         loading={loading}
+        enableSearch
+        searchPlaceholder="Search symbol or name…"
         emptyMessage="No LTP yet — click Refresh (Angel Enabled=true)."
       />
     </>

@@ -391,6 +391,8 @@ export default function LiquiditySignalsPage() {
         rows={visibleRows}
         getRowId={(r) => r.id}
         loading={loading}
+        enableSearch
+        searchPlaceholder="Search symbol or name…"
         emptyMessage={
           sectorCheck || riskRewardCheck
             ? "No liquidity signals match the active filters. Turn filters off, or Run liquidity again."

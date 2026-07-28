@@ -415,6 +415,7 @@ const ZenPrimaryLayout: React.FC<ZenPrimaryLayoutProps> = ({ children }) => {
         <Box
           sx={{
             flex: 1,
+            minHeight: 0,
             overflow: "auto",
             px: { xs: 2, sm: 3 },
             py: 2,

@@ -15,7 +15,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FloppyDisk, Play, Stop } from "@phosphor-icons/react";
+import { FloppyDisk, FilePdf, Play, Stop } from "@phosphor-icons/react";
 import { ActionFactory, DataFactory } from "../api/factories";
 import type {
   BacktestNoteInput,
@@ -27,6 +27,11 @@ import type { ColumnConfig } from "../zen_components/table/columnTypes";
 import ZenTable from "../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../constants";
+import {
+  downloadPdfTable,
+  exportStamp,
+  type ExportColumn,
+} from "../utils/exportTable";
 
 type StrategyFilter = "all" | "signals" | "liquidity";
 
@@ -97,6 +102,35 @@ function mergeSummary(
   });
 }
 
+/** Portfolio hit rate: total targets / (targets + SLs), not average of averages. */
+function aggregateStats(rows: BacktestSymbolSummary[]) {
+  const setups = rows.reduce((s, r) => s + (r.timesInStrategy || 0), 0);
+  const targetHits = rows.reduce((s, r) => s + (r.targetHits || 0), 0);
+  const slHits = rows.reduce((s, r) => s + (r.slHits || 0), 0);
+  const decided = targetHits + slHits;
+  const avgHitRatePct = decided > 0 ? (100 * targetHits) / decided : null;
+
+  let weightedTargetPctSum = 0;
+  let weightedTargetPctWeight = 0;
+  for (const r of rows) {
+    if (r.avgTargetHitPct == null || !Number.isFinite(Number(r.avgTargetHitPct))) continue;
+    const w = Math.max(1, r.timesInStrategy || 0);
+    weightedTargetPctSum += Number(r.avgTargetHitPct) * w;
+    weightedTargetPctWeight += w;
+  }
+  const avgTargetPct =
+    weightedTargetPctWeight > 0 ? weightedTargetPctSum / weightedTargetPctWeight : null;
+
+  return {
+    stocks: rows.length,
+    setups,
+    targetHits,
+    slHits,
+    avgHitRatePct,
+    avgTargetPct,
+  };
+}
+
 const summaryColumns: ColumnConfig<BacktestSymbolSummary>[] = [
   columnFactories.createTextColumn<BacktestSymbolSummary>({
     field: "appSymbol",
@@ -139,15 +173,42 @@ const summaryColumns: ColumnConfig<BacktestSymbolSummary>[] = [
     headerName: "Hit rate",
     width: 100,
     getValue: (r) =>
-      r.targetHitRatePct != null ? `${Number(r.targetHitRatePct).toFixed(1)}%` : "—",
+      r.targetHitRatePct != null && Number.isFinite(Number(r.targetHitRatePct))
+        ? Number(r.targetHitRatePct)
+        : null,
+    displayRenderer: (v) =>
+      v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(1)}%` : "—",
   }),
   columnFactories.createTextColumn<BacktestSymbolSummary>({
     field: "avgTargetHitPct",
     headerName: "Avg target %",
     width: 120,
     getValue: (r) =>
-      r.avgTargetHitPct != null ? `${Number(r.avgTargetHitPct).toFixed(0)}%` : "—",
+      r.avgTargetHitPct != null && Number.isFinite(Number(r.avgTargetHitPct))
+        ? Number(r.avgTargetHitPct)
+        : null,
+    displayRenderer: (v) =>
+      v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(0)}%` : "—",
   }),
+];
+
+const backtestExportColumns: ExportColumn<BacktestSymbolSummary>[] = [
+  { header: "Symbol", value: (r) => r.appSymbol },
+  { header: "Stock name", value: (r) => r.instrumentName },
+  { header: "Strategy", value: (r) => strategyLabel(r.strategyFilter) },
+  { header: "Setups", value: (r) => r.timesInStrategy },
+  { header: "Target hits", value: (r) => r.targetHits },
+  { header: "SL hits", value: (r) => r.slHits },
+  {
+    header: "Hit rate %",
+    value: (r) =>
+      r.targetHitRatePct != null ? Number(r.targetHitRatePct).toFixed(1) : "",
+  },
+  {
+    header: "Avg target %",
+    value: (r) =>
+      r.avgTargetHitPct != null ? Number(r.avgTargetHitPct).toFixed(0) : "",
+  },
 ];
 
 export default function BacktestPage() {
@@ -178,6 +239,8 @@ export default function BacktestPage() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showManualForm, setShowManualForm] = useState(false);
+  const [search, setSearch] = useState("");
+  const [visibleRows, setVisibleRows] = useState<BacktestSymbolSummary[]>([]);
   const cancelBatchRef = useRef(false);
 
   const loadSummaries = useCallback(async () => {
@@ -338,6 +401,29 @@ export default function BacktestPage() {
     return summaries.filter((r) => r.strategyFilter === strategyFilter);
   }, [summaries, strategyFilter]);
 
+  const onVisibleRowsChange = useCallback((rows: BacktestSymbolSummary[]) => {
+    setVisibleRows(rows);
+  }, []);
+
+  const stats = useMemo(() => aggregateStats(visibleRows), [visibleRows]);
+
+  function onExportPdf() {
+    const filterLabel =
+      strategyFilter === "all"
+        ? "All strategies"
+        : strategyFilter === "liquidity"
+          ? "Liquidity"
+          : "Signals";
+    const hit =
+      stats.avgHitRatePct != null ? `${stats.avgHitRatePct.toFixed(1)}%` : "—";
+    downloadPdfTable({
+      title: `Backtest 1Y · ${filterLabel} · Avg hit rate ${hit}`,
+      fileName: exportStamp("backtest", "pdf"),
+      columns: backtestExportColumns,
+      rows: visibleRows,
+    });
+  }
+
   return (
     <MuiStack
       spacing={2}
@@ -375,84 +461,124 @@ export default function BacktestPage() {
           spacing={1}
           alignItems="center"
           flexWrap="wrap"
-          sx={{ mt: error || batchProgress ? 2 : 0 }}
+          sx={{ mt: batchProgress ? 2 : 2 }}
         >
-        <FormControl size="small" sx={{ minWidth: 140 }} disabled={runningAll}>
-          <InputLabel>Strategy</InputLabel>
-          <Select
-            label="Strategy"
-            value={strategyFilter}
-            onChange={(e) => {
-              const next = e.target.value as StrategyFilter;
-              setStrategyFilter(next);
-              sessionStorage.setItem("backtest.strategyFilter", next);
+          <FormControl size="small" sx={{ minWidth: 140 }} disabled={runningAll}>
+            <InputLabel>Strategy</InputLabel>
+            <Select
+              label="Strategy"
+              value={strategyFilter}
+              onChange={(e) => {
+                const next = e.target.value as StrategyFilter;
+                setStrategyFilter(next);
+                sessionStorage.setItem("backtest.strategyFilter", next);
+              }}
+            >
+              <MenuItem value="all">All</MenuItem>
+              <MenuItem value="signals">Signals</MenuItem>
+              <MenuItem value="liquidity">Liquidity</MenuItem>
+            </Select>
+          </FormControl>
+          <Autocomplete
+            sx={{ minWidth: 260 }}
+            size="small"
+            options={universe}
+            getOptionLabel={(o) => `${o.symbol} — ${o.name}`}
+            value={runTarget}
+            onChange={(_, v) => {
+              setRunTarget(v);
+              if (v) setForm((prev) => ({ ...emptyForm(v.id), strategy: prev.strategy || "signals" }));
             }}
+            renderInput={(params) => <TextField {...params} label="Run 1Y for" />}
+            isOptionEqualToValue={(a, b) => a.id === b.id}
+            disabled={runningAll}
+          />
+          <Button
+            size="small"
+            variant="contained"
+            disabled={!runTarget || running || runningAll || loading}
+            startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
+            onClick={() => void onRunHistorical()}
           >
-            <MenuItem value="all">All</MenuItem>
-            <MenuItem value="signals">Signals</MenuItem>
-            <MenuItem value="liquidity">Liquidity</MenuItem>
-          </Select>
-        </FormControl>
-        <Autocomplete
-          sx={{ minWidth: 260 }}
-          size="small"
-          options={universe}
-          getOptionLabel={(o) => `${o.symbol} — ${o.name}`}
-          value={runTarget}
-          onChange={(_, v) => {
-            setRunTarget(v);
-            if (v) setForm((prev) => ({ ...emptyForm(v.id), strategy: prev.strategy || "signals" }));
-          }}
-          renderInput={(params) => <TextField {...params} label="Run 1Y for" />}
-          isOptionEqualToValue={(a, b) => a.id === b.id}
-          disabled={runningAll}
-        />
-        <Button
-          size="small"
-          variant="contained"
-          disabled={!runTarget || running || runningAll || loading}
-          startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
-          onClick={() => void onRunHistorical()}
-        >
-          {running
-            ? strategyFilter === "liquidity" || strategyFilter === "all"
-              ? "Running 1Y… (may take a few min)"
-              : "Running 1Y…"
-            : strategyFilter === "all"
-              ? "Run 1Y (both)"
-              : "Run 1Y backtest"}
-        </Button>
-        <Button
-          size="small"
-          variant="outlined"
-          disabled={universe.length === 0 || running || runningAll || loading}
-          startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
-          onClick={() => void onRunAllHistorical()}
-        >
-          {runningAll ? "Running all…" : "Run all 1Y"}
-        </Button>
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={skipCompleted}
-              disabled={runningAll}
-              onChange={(e) => setSkipCompleted(e.target.checked)}
-            />
-          }
-          label="Skip completed"
-        />
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={showManualForm}
-              onChange={(e) => setShowManualForm(e.target.checked)}
-            />
-          }
-          label="Manual note"
-        />
+            {running
+              ? strategyFilter === "liquidity" || strategyFilter === "all"
+                ? "Running 1Y… (may take a few min)"
+                : "Running 1Y…"
+              : strategyFilter === "all"
+                ? "Run 1Y (both)"
+                : "Run 1Y backtest"}
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={universe.length === 0 || running || runningAll || loading}
+            startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
+            onClick={() => void onRunAllHistorical()}
+          >
+            {runningAll ? "Running all…" : "Run all 1Y"}
+          </Button>
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={skipCompleted}
+                disabled={runningAll}
+                onChange={(e) => setSkipCompleted(e.target.checked)}
+              />
+            }
+            label="Skip completed"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={showManualForm}
+                onChange={(e) => setShowManualForm(e.target.checked)}
+              />
+            }
+            label="Manual note"
+          />
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={loading || visibleRows.length === 0}
+            startIcon={<FilePdf size={DEFAULT_SMALL_ICON_SIZE} />}
+            onClick={onExportPdf}
+          >
+            PDF
+          </Button>
         </MuiStack>
+
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+            gap: 1.5,
+            mt: 2,
+            p: 1.5,
+            bgcolor: "background.paper",
+            border: "1px solid",
+            borderColor: "divider",
+            borderRadius: 1,
+          }}
+        >
+          <Stat label="Rows" value={String(stats.stocks)} />
+          <Stat label="Setups" value={String(stats.setups)} />
+          <Stat label="Target hits" value={String(stats.targetHits)} />
+          <Stat label="SL hits" value={String(stats.slHits)} />
+          <Stat
+            label="Avg hit rate"
+            value={
+              stats.avgHitRatePct != null ? `${stats.avgHitRatePct.toFixed(1)}%` : "—"
+            }
+          />
+          <Stat
+            label="Avg target %"
+            value={
+              stats.avgTargetPct != null ? `${stats.avgTargetPct.toFixed(0)}%` : "—"
+            }
+          />
+        </Box>
       </Box>
 
       <Box
@@ -474,6 +600,11 @@ export default function BacktestPage() {
             emptyMessage="No backtest data yet. Pick a symbol and run 1Y backtest."
             defaultPageSize={50}
             fillHeight
+            enableSearch
+            search={search}
+            onSearchChange={setSearch}
+            searchPlaceholder="Search symbol or stock name…"
+            onVisibleRowsChange={onVisibleRowsChange}
           />
         </Box>
 
@@ -488,86 +619,99 @@ export default function BacktestPage() {
               borderRadius: 1,
             }}
           >
-          <Typography variant="subtitle1" sx={{ mb: 1.5 }}>
-            {form.id ? "Edit manual note" : "Add manual note"}{" "}
-            {runTarget ? `· ${runTarget.symbol}` : ""}
-          </Typography>
-          <MuiStack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
-            <FormControl size="small" sx={{ minWidth: 120 }}>
-              <InputLabel>Strategy</InputLabel>
-              <Select
-                label="Strategy"
-                value={form.strategy}
-                onChange={(e) => setForm({ ...form, strategy: e.target.value })}
+            <Typography variant="subtitle1" sx={{ mb: 1.5 }}>
+              {form.id ? "Edit manual note" : "Add manual note"}{" "}
+              {runTarget ? `· ${runTarget.symbol}` : ""}
+            </Typography>
+            <MuiStack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel>Strategy</InputLabel>
+                <Select
+                  label="Strategy"
+                  value={form.strategy}
+                  onChange={(e) => setForm({ ...form, strategy: e.target.value })}
+                >
+                  <MenuItem value="signals">Signals</MenuItem>
+                  <MenuItem value="liquidity">Liquidity</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ minWidth: 100 }}>
+                <InputLabel>Side</InputLabel>
+                <Select
+                  label="Side"
+                  value={form.side}
+                  onChange={(e) => setForm({ ...form, side: e.target.value })}
+                >
+                  <MenuItem value="buy">BUY</MenuItem>
+                  <MenuItem value="sell">SELL</MenuItem>
+                </Select>
+              </FormControl>
+              <TextField
+                size="small"
+                label="Signal date"
+                type="date"
+                InputLabelProps={{ shrink: true }}
+                value={form.signalDate}
+                onChange={(e) => setForm({ ...form, signalDate: e.target.value })}
+              />
+              <TextField
+                size="small"
+                label="Entry"
+                type="number"
+                value={form.entryPrice || ""}
+                onChange={(e) => setForm({ ...form, entryPrice: Number(e.target.value) || 0 })}
+                sx={{ width: 110 }}
+              />
+              <TextField
+                size="small"
+                label="SL"
+                type="number"
+                value={form.initialStopLoss || ""}
+                onChange={(e) =>
+                  setForm({ ...form, initialStopLoss: Number(e.target.value) || 0 })
+                }
+                sx={{ width: 110 }}
+              />
+              <FormControl size="small" sx={{ minWidth: 120 }}>
+                <InputLabel>Result</InputLabel>
+                <Select
+                  label="Result"
+                  value={form.result}
+                  onChange={(e) => setForm({ ...form, result: e.target.value })}
+                >
+                  <MenuItem value="target">Target</MenuItem>
+                  <MenuItem value="sl">SL</MenuItem>
+                  <MenuItem value="skipped">Skipped</MenuItem>
+                  <MenuItem value="open">Open</MenuItem>
+                  <MenuItem value="time_stop">Time stop</MenuItem>
+                </Select>
+              </FormControl>
+              <Button
+                variant="contained"
+                size="small"
+                disabled={!runTarget || saving}
+                startIcon={<FloppyDisk size={DEFAULT_SMALL_ICON_SIZE} />}
+                onClick={() => void onSave()}
               >
-                <MenuItem value="signals">Signals</MenuItem>
-                <MenuItem value="liquidity">Liquidity</MenuItem>
-              </Select>
-            </FormControl>
-            <FormControl size="small" sx={{ minWidth: 100 }}>
-              <InputLabel>Side</InputLabel>
-              <Select
-                label="Side"
-                value={form.side}
-                onChange={(e) => setForm({ ...form, side: e.target.value })}
-              >
-                <MenuItem value="buy">BUY</MenuItem>
-                <MenuItem value="sell">SELL</MenuItem>
-              </Select>
-            </FormControl>
-            <TextField
-              size="small"
-              label="Signal date"
-              type="date"
-              InputLabelProps={{ shrink: true }}
-              value={form.signalDate}
-              onChange={(e) => setForm({ ...form, signalDate: e.target.value })}
-            />
-            <TextField
-              size="small"
-              label="Entry"
-              type="number"
-              value={form.entryPrice || ""}
-              onChange={(e) => setForm({ ...form, entryPrice: Number(e.target.value) || 0 })}
-              sx={{ width: 110 }}
-            />
-            <TextField
-              size="small"
-              label="SL"
-              type="number"
-              value={form.initialStopLoss || ""}
-              onChange={(e) =>
-                setForm({ ...form, initialStopLoss: Number(e.target.value) || 0 })
-              }
-              sx={{ width: 110 }}
-            />
-            <FormControl size="small" sx={{ minWidth: 120 }}>
-              <InputLabel>Result</InputLabel>
-              <Select
-                label="Result"
-                value={form.result}
-                onChange={(e) => setForm({ ...form, result: e.target.value })}
-              >
-                <MenuItem value="target">Target</MenuItem>
-                <MenuItem value="sl">SL</MenuItem>
-                <MenuItem value="skipped">Skipped</MenuItem>
-                <MenuItem value="open">Open</MenuItem>
-                <MenuItem value="time_stop">Time stop</MenuItem>
-              </Select>
-            </FormControl>
-            <Button
-              variant="contained"
-              size="small"
-              disabled={!runTarget || saving}
-              startIcon={<FloppyDisk size={DEFAULT_SMALL_ICON_SIZE} />}
-              onClick={() => void onSave()}
-            >
-              {saving ? "Saving…" : form.id ? "Update" : "Save note"}
-            </Button>
-          </MuiStack>
+                {saving ? "Saving…" : form.id ? "Update" : "Save note"}
+              </Button>
+            </MuiStack>
           </Box>
         ) : null}
       </Box>
     </MuiStack>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <Box>
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="h6" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+        {value}
+      </Typography>
+    </Box>
   );
 }

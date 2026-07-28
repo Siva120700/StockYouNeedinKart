@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Box,
   CircularProgress,
+  IconButton,
+  InputAdornment,
   Paper,
   Stack,
   Table,
@@ -10,10 +12,14 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TableSortLabel,
+  TextField,
   Typography,
 } from "@mui/material";
+import { MagnifyingGlass, X } from "@phosphor-icons/react";
 import type { ColumnConfig } from "./columnTypes";
 import ZenPagination from "../shared/ZenPagination";
+import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 
 export type ZenTableProps<T> = {
   columns: ColumnConfig<T>[];
@@ -28,7 +34,46 @@ export type ZenTableProps<T> = {
   defaultPageSize?: number;
   /** Fill parent height and scroll rows inside the table body. */
   fillHeight?: boolean;
+  /** Show a search box that filters rows by any column value. */
+  enableSearch?: boolean;
+  searchPlaceholder?: string;
+  /** Controlled search (optional). */
+  search?: string;
+  onSearchChange?: (value: string) => void;
+  /** Notify parent of filtered/sorted rows (e.g. for aggregate stats). */
+  onVisibleRowsChange?: (rows: T[]) => void;
 };
+
+type SortDir = "asc" | "desc";
+
+function compareValues(a: unknown, b: unknown): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return -1;
+  if (b == null) return 1;
+
+  if (typeof a === "number" && typeof b === "number") {
+    if (Number.isNaN(a) && Number.isNaN(b)) return 0;
+    if (Number.isNaN(a)) return -1;
+    if (Number.isNaN(b)) return 1;
+    return a - b;
+  }
+
+  const an = typeof a === "string" && a.trim() !== "" && !Number.isNaN(Number(a)) ? Number(a) : null;
+  const bn = typeof b === "string" && b.trim() !== "" && !Number.isNaN(Number(b)) ? Number(b) : null;
+  if (an != null && bn != null) return an - bn;
+
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function rowMatchesSearch<T>(row: T, columns: ColumnConfig<T>[], query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return columns.some((col) => {
+    const value = col.getValue(row);
+    if (value == null) return false;
+    return String(value).toLowerCase().includes(q);
+  });
+}
 
 export function ZenTable<T>({
   columns,
@@ -41,15 +86,66 @@ export function ZenTable<T>({
   enablePagination = true,
   defaultPageSize = 25,
   fillHeight = false,
+  enableSearch = false,
+  searchPlaceholder = "Search…",
+  search: controlledSearch,
+  onSearchChange,
+  onVisibleRowsChange,
 }: ZenTableProps<T>) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(defaultPageSize);
+  const [internalSearch, setInternalSearch] = useState("");
+  const [sortField, setSortField] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const search = controlledSearch ?? internalSearch;
+
+  function setSearch(value: string) {
+    if (onSearchChange) onSearchChange(value);
+    else setInternalSearch(value);
+    setPage(0);
+  }
+
+  const processedRows = useMemo(() => {
+    let list = rows;
+    if (enableSearch && search.trim()) {
+      list = list.filter((row) => rowMatchesSearch(row, columns, search));
+    }
+
+    if (sortField) {
+      const col = columns.find((c) => c.field === sortField);
+      if (col) {
+        const dir = sortDir === "asc" ? 1 : -1;
+        list = [...list].sort((a, b) => dir * compareValues(col.getValue(a), col.getValue(b)));
+      }
+    }
+
+    return list;
+  }, [rows, columns, enableSearch, search, sortField, sortDir]);
+
+  useEffect(() => {
+    onVisibleRowsChange?.(processedRows);
+  }, [processedRows, onVisibleRowsChange]);
 
   const pagedRows = useMemo(() => {
-    if (!enablePagination) return rows;
+    if (!enablePagination) return processedRows;
     const start = page * pageSize;
-    return rows.slice(start, start + pageSize);
-  }, [rows, page, pageSize, enablePagination]);
+    return processedRows.slice(start, start + pageSize);
+  }, [processedRows, page, pageSize, enablePagination]);
+
+  function toggleSort(field: string, sortable?: boolean) {
+    if (sortable === false) return;
+    if (sortField !== field) {
+      setSortField(field);
+      setSortDir("asc");
+    } else if (sortDir === "asc") {
+      setSortDir("desc");
+    } else {
+      setSortField(null);
+      setSortDir("asc");
+    }
+    setPage(0);
+  }
 
   if (loading) {
     return (
@@ -79,25 +175,65 @@ export function ZenTable<T>({
         ...(fillHeight ? { height: "100%", minHeight: 0 } : {}),
       }}
     >
+      {enableSearch ? (
+        <Box sx={{ px: 1.5, py: 1, borderBottom: "1px solid", borderColor: "divider" }}>
+          <TextField
+            size="small"
+            fullWidth
+            placeholder={searchPlaceholder}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <MagnifyingGlass size={DEFAULT_SMALL_ICON_SIZE} />
+                </InputAdornment>
+              ),
+              endAdornment: search ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
+                    <X size={DEFAULT_SMALL_ICON_SIZE} />
+                  </IconButton>
+                </InputAdornment>
+              ) : undefined,
+            }}
+          />
+        </Box>
+      ) : null}
+
       <TableContainer sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <Table stickyHeader size={dense ? "small" : "medium"}>
           <TableHead>
             <TableRow>
-              {columns.map((col) => (
-                <TableCell
-                  key={col.field}
-                  align={col.cellAlignment ?? "left"}
-                  sx={{
-                    width: col.width,
-                    minWidth: col.width,
-                    fontWeight: 600,
-                    bgcolor: "background.paper",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {col.headerName}
-                </TableCell>
-              ))}
+              {columns.map((col) => {
+                const canSort = col.sortable !== false && col.type !== "action";
+                return (
+                  <TableCell
+                    key={col.field}
+                    align={col.cellAlignment ?? "left"}
+                    sortDirection={sortField === col.field ? sortDir : false}
+                    sx={{
+                      width: col.width,
+                      minWidth: col.width,
+                      fontWeight: 600,
+                      bgcolor: "background.paper",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {canSort ? (
+                      <TableSortLabel
+                        active={sortField === col.field}
+                        direction={sortField === col.field ? sortDir : "asc"}
+                        onClick={() => toggleSort(col.field, col.sortable)}
+                      >
+                        {col.headerName}
+                      </TableSortLabel>
+                    ) : (
+                      col.headerName
+                    )}
+                  </TableCell>
+                );
+              })}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -139,7 +275,7 @@ export function ZenTable<T>({
         </Table>
       </TableContainer>
 
-      {enablePagination && rows.length > 0 ? (
+      {enablePagination && processedRows.length > 0 ? (
         <Stack
           direction="row"
           justifyContent="flex-end"
@@ -149,7 +285,7 @@ export function ZenTable<T>({
           <ZenPagination
             pageSize={pageSize}
             currentPage={page}
-            totalCount={rows.length}
+            totalCount={processedRows.length}
             onPageChange={setPage}
             onPageSizeChange={setPageSize}
           />

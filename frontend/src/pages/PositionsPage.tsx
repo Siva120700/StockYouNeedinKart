@@ -135,6 +135,8 @@ export default function PositionsPage() {
         rows={rows}
         getRowId={(r) => r.id}
         loading={loading}
+        enableSearch
+        searchPlaceholder="Search symbol or name…"
         emptyMessage="No open positions."
       />
     </>
