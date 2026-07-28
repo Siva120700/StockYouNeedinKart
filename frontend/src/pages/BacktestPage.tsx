@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Autocomplete,
@@ -7,6 +7,7 @@ import {
   FormControl,
   FormControlLabel,
   InputLabel,
+  LinearProgress,
   MenuItem,
   Select,
   Stack as MuiStack,
@@ -14,7 +15,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FloppyDisk, Play } from "@phosphor-icons/react";
+import { FloppyDisk, Play, Stop } from "@phosphor-icons/react";
 import { ActionFactory, DataFactory } from "../api/factories";
 import type {
   BacktestNoteInput,
@@ -65,6 +66,35 @@ function strategyLabel(strategy: string | null | undefined): string {
 
 function summaryRowId(row: BacktestSymbolSummary): string {
   return `${row.instrumentId}-${row.strategyFilter ?? "unknown"}`;
+}
+
+function strategiesForFilter(filter: StrategyFilter): readonly ("signals" | "liquidity")[] {
+  return filter === "all" ? (["signals", "liquidity"] as const) : ([filter] as const);
+}
+
+function isStockCompleted(
+  instrumentId: string,
+  strategies: readonly ("signals" | "liquidity")[],
+  summaries: BacktestSymbolSummary[],
+): boolean {
+  return strategies.every((s) =>
+    summaries.some(
+      (r) => r.instrumentId === instrumentId && r.strategyFilter === s && r.timesInStrategy > 0,
+    ),
+  );
+}
+
+function mergeSummary(
+  rows: BacktestSymbolSummary[],
+  incoming: BacktestSymbolSummary,
+): BacktestSymbolSummary[] {
+  const id = summaryRowId(incoming);
+  const rest = rows.filter((r) => summaryRowId(r) !== id);
+  return [...rest, incoming].sort((a, b) => {
+    const sym = a.appSymbol.localeCompare(b.appSymbol);
+    if (sym !== 0) return sym;
+    return (a.strategyFilter ?? "").localeCompare(b.strategyFilter ?? "");
+  });
 }
 
 const summaryColumns: ColumnConfig<BacktestSymbolSummary>[] = [
@@ -137,8 +167,18 @@ export default function BacktestPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runningAll, setRunningAll] = useState(false);
+  const [skipCompleted, setSkipCompleted] = useState(true);
+  const [batchProgress, setBatchProgress] = useState<{
+    current: number;
+    total: number;
+    symbol: string;
+    strategy: string;
+    failed: number;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showManualForm, setShowManualForm] = useState(false);
+  const cancelBatchRef = useRef(false);
 
   const loadSummaries = useCallback(async () => {
     setIsSyncing(true);
@@ -188,16 +228,83 @@ export default function BacktestPage() {
     setError(null);
     setIsSyncing(true);
     try {
-      const strategies =
-        strategyFilter === "all" ? (["signals", "liquidity"] as const) : ([strategyFilter] as const);
+      const strategies = strategiesForFilter(strategyFilter);
       for (const s of strategies) {
-        await ActionFactory.runHistoricalBacktest(runTarget.id, s);
+        const summary = await ActionFactory.runHistoricalBacktest(runTarget.id, s);
+        setSummaries((prev) => mergeSummary(prev, summary));
       }
       await loadSummaries();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setRunning(false);
+      setIsSyncing(false);
+    }
+  }
+
+  function stopBatch() {
+    cancelBatchRef.current = true;
+  }
+
+  async function onRunAllHistorical() {
+    if (universe.length === 0 || runningAll) return;
+    const strategies = strategiesForFilter(strategyFilter);
+    const queue = universe.filter(
+      (stock) => !skipCompleted || !isStockCompleted(stock.id, strategies, summaries),
+    );
+
+    if (queue.length === 0) {
+      setError("All stocks already have backtest data for the selected strategy.");
+      return;
+    }
+
+    cancelBatchRef.current = false;
+    setRunningAll(true);
+    setError(null);
+    setIsSyncing(true);
+    let failed = 0;
+
+    try {
+      for (let i = 0; i < queue.length; i++) {
+        if (cancelBatchRef.current) break;
+
+        const stock = queue[i]!;
+        setRunTarget(stock);
+        setBatchProgress({
+          current: i + 1,
+          total: queue.length,
+          symbol: stock.symbol,
+          strategy: strategies[0] ?? "",
+          failed,
+        });
+
+        for (const s of strategies) {
+          if (cancelBatchRef.current) break;
+          setBatchProgress((p) => (p ? { ...p, symbol: stock.symbol, strategy: s } : p));
+          try {
+            const summary = await ActionFactory.runHistoricalBacktest(stock.id, s);
+            setSummaries((prev) => mergeSummary(prev, summary));
+          } catch (e) {
+            failed++;
+            setError(
+              `${stock.symbol} (${s}): ${e instanceof Error ? e.message : String(e)}` +
+                (i < queue.length - 1 ? " — continuing with next stock…" : ""),
+            );
+          }
+          if (!cancelBatchRef.current && s !== strategies[strategies.length - 1]) {
+            await new Promise((r) => setTimeout(r, 1500));
+          }
+        }
+
+        if (!cancelBatchRef.current && i < queue.length - 1) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+
+      await loadSummaries();
+    } finally {
+      setRunningAll(false);
+      setBatchProgress(null);
       setIsSyncing(false);
     }
   }
@@ -232,11 +339,45 @@ export default function BacktestPage() {
   }, [summaries, strategyFilter]);
 
   return (
-    <MuiStack spacing={2}>
-      {error ? <Alert severity="error">{error}</Alert> : null}
+    <MuiStack
+      spacing={2}
+      sx={{ height: "100%", overflow: "hidden", minHeight: 0 }}
+    >
+      <Box sx={{ flexShrink: 0 }}>
+        {error ? <Alert severity="error">{error}</Alert> : null}
 
-      <MuiStack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-        <FormControl size="small" sx={{ minWidth: 140 }}>
+        {batchProgress ? (
+          <Box sx={{ mt: error ? 2 : 0 }}>
+            <MuiStack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.5 }}>
+              <Typography variant="body2" color="text.secondary">
+                {batchProgress.symbol} · {batchProgress.current}/{batchProgress.total} ·{" "}
+                {strategyLabel(batchProgress.strategy)}
+                {batchProgress.failed > 0 ? ` · ${batchProgress.failed} failed` : ""}
+              </Typography>
+              <Button
+                size="small"
+                color="inherit"
+                startIcon={<Stop size={DEFAULT_SMALL_ICON_SIZE} />}
+                onClick={stopBatch}
+              >
+                Stop
+              </Button>
+            </MuiStack>
+            <LinearProgress
+              variant="determinate"
+              value={(batchProgress.current / batchProgress.total) * 100}
+            />
+          </Box>
+        ) : null}
+
+        <MuiStack
+          direction="row"
+          spacing={1}
+          alignItems="center"
+          flexWrap="wrap"
+          sx={{ mt: error || batchProgress ? 2 : 0 }}
+        >
+        <FormControl size="small" sx={{ minWidth: 140 }} disabled={runningAll}>
           <InputLabel>Strategy</InputLabel>
           <Select
             label="Strategy"
@@ -264,11 +405,12 @@ export default function BacktestPage() {
           }}
           renderInput={(params) => <TextField {...params} label="Run 1Y for" />}
           isOptionEqualToValue={(a, b) => a.id === b.id}
+          disabled={runningAll}
         />
         <Button
           size="small"
           variant="contained"
-          disabled={!runTarget || running || loading}
+          disabled={!runTarget || running || runningAll || loading}
           startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
           onClick={() => void onRunHistorical()}
         >
@@ -280,6 +422,26 @@ export default function BacktestPage() {
               ? "Run 1Y (both)"
               : "Run 1Y backtest"}
         </Button>
+        <Button
+          size="small"
+          variant="outlined"
+          disabled={universe.length === 0 || running || runningAll || loading}
+          startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
+          onClick={() => void onRunAllHistorical()}
+        >
+          {runningAll ? "Running all…" : "Run all 1Y"}
+        </Button>
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={skipCompleted}
+              disabled={runningAll}
+              onChange={(e) => setSkipCompleted(e.target.checked)}
+            />
+          }
+          label="Skip completed"
+        />
         <FormControlLabel
           control={
             <Switch
@@ -290,27 +452,42 @@ export default function BacktestPage() {
           }
           label="Manual note"
         />
-      </MuiStack>
+        </MuiStack>
+      </Box>
 
-      <ZenTable
-        columns={summaryColumns}
-        rows={tableRows}
-        getRowId={summaryRowId}
-        loading={loading}
-        emptyMessage="No backtest data yet. Pick a symbol and run 1Y backtest."
-        defaultPageSize={50}
-      />
+      <Box
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}
+      >
+        <Box sx={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <ZenTable
+            columns={summaryColumns}
+            rows={tableRows}
+            getRowId={summaryRowId}
+            loading={loading}
+            emptyMessage="No backtest data yet. Pick a symbol and run 1Y backtest."
+            defaultPageSize={50}
+            fillHeight
+          />
+        </Box>
 
-      {showManualForm ? (
-        <Box
-          sx={{
-            p: 2,
-            bgcolor: "background.paper",
-            border: "1px solid",
-            borderColor: "divider",
-            borderRadius: 1,
-          }}
-        >
+        {showManualForm ? (
+          <Box
+            sx={{
+              flexShrink: 0,
+              p: 2,
+              bgcolor: "background.paper",
+              border: "1px solid",
+              borderColor: "divider",
+              borderRadius: 1,
+            }}
+          >
           <Typography variant="subtitle1" sx={{ mb: 1.5 }}>
             {form.id ? "Edit manual note" : "Add manual note"}{" "}
             {runTarget ? `· ${runTarget.symbol}` : ""}
@@ -388,8 +565,9 @@ export default function BacktestPage() {
               {saving ? "Saving…" : form.id ? "Update" : "Save note"}
             </Button>
           </MuiStack>
-        </Box>
-      ) : null}
+          </Box>
+        ) : null}
+      </Box>
     </MuiStack>
   );
 }

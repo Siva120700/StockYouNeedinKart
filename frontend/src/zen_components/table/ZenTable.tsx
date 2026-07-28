@@ -26,6 +26,8 @@ export type ZenTableProps<T> = {
   /** Client-side pagination (default true when rows.length > pageSize). */
   enablePagination?: boolean;
   defaultPageSize?: number;
+  /** Fill parent height and scroll rows inside the table body. */
+  fillHeight?: boolean;
 };
 
 export function ZenTable<T>({
@@ -38,6 +40,7 @@ export function ZenTable<T>({
   dense = true,
   enablePagination = true,
   defaultPageSize = 25,
+  fillHeight = false,
 }: ZenTableProps<T>) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(defaultPageSize);
@@ -50,7 +53,13 @@ export function ZenTable<T>({
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" py={6}>
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        py={6}
+        sx={fillHeight ? { flex: 1, minHeight: 0 } : undefined}
+      >
         <CircularProgress size={28} />
       </Box>
     );
@@ -67,9 +76,10 @@ export function ZenTable<T>({
         display: "flex",
         flexDirection: "column",
         maxHeight: "100%",
+        ...(fillHeight ? { height: "100%", minHeight: 0 } : {}),
       }}
     >
-      <TableContainer sx={{ flex: 1 }}>
+      <TableContainer sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <Table stickyHeader size={dense ? "small" : "medium"}>
           <TableHead>
             <TableRow>
