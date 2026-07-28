@@ -414,13 +414,27 @@ export default function BacktestPage() {
         : strategyFilter === "liquidity"
           ? "Liquidity"
           : "Signals";
-    const hit =
-      stats.avgHitRatePct != null ? `${stats.avgHitRatePct.toFixed(1)}%` : "—";
     downloadPdfTable({
-      title: `Backtest 1Y · ${filterLabel} · Avg hit rate ${hit}`,
+      title: `Backtest 1Y · ${filterLabel}`,
       fileName: exportStamp("backtest", "pdf"),
       columns: backtestExportColumns,
       rows: visibleRows,
+      summary: [
+        { label: "Rows", value: String(stats.stocks) },
+        { label: "Setups", value: String(stats.setups) },
+        { label: "Target hits", value: String(stats.targetHits) },
+        { label: "SL hits", value: String(stats.slHits) },
+        {
+          label: "Avg hit rate",
+          value:
+            stats.avgHitRatePct != null ? `${stats.avgHitRatePct.toFixed(1)}%` : "—",
+        },
+        {
+          label: "Avg target %",
+          value:
+            stats.avgTargetPct != null ? `${stats.avgTargetPct.toFixed(0)}%` : "—",
+        },
+      ],
     });
   }
 

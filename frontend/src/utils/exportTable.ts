@@ -33,8 +33,10 @@ export function downloadPdfTable<T>(opts: {
   fileName: string;
   columns: ExportColumn<T>[];
   rows: T[];
+  /** Optional summary lines shown under the title (e.g. backtest aggregates). */
+  summary?: Array<{ label: string; value: string }>;
 }): void {
-  const { title, fileName, columns, rows } = opts;
+  const { title, fileName, columns, rows, summary } = opts;
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const when = new Date().toLocaleString("en-IN");
 
@@ -45,13 +47,28 @@ export function downloadPdfTable<T>(opts: {
   doc.text(`${when}  ·  ${rows.length} row${rows.length === 1 ? "" : "s"}`, 40, 52);
   doc.setTextColor(0);
 
+  let startY = 62;
+  if (summary && summary.length > 0) {
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.text("Summary", 40, startY);
+    doc.setFont("helvetica", "normal");
+    startY += 14;
+
+    const summaryText = summary.map((s) => `${s.label}: ${s.value}`).join("   ·   ");
+    doc.setFontSize(9);
+    const wrapped = doc.splitTextToSize(summaryText, doc.internal.pageSize.getWidth() - 80);
+    doc.text(wrapped, 40, startY);
+    startY += wrapped.length * 12 + 10;
+  }
+
   const head = [columns.map((c) => c.header)];
   const body = rows.map((row) => columns.map((c) => cellText(c.value(row))));
 
   autoTable(doc, {
     head,
     body,
-    startY: 62,
+    startY,
     styles: { fontSize: 7, cellPadding: 3, overflow: "linebreak" },
     headStyles: { fillColor: [33, 33, 33], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 245, 245] },
