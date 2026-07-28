@@ -39,10 +39,11 @@ public sealed class Query
 
     public async Task<IReadOnlyList<LiquiditySignalRow>> LiquiditySignals(
         Guid? runId,
+        string? ruleset,
         [Service] ICurrentUserAccessor user,
         [Service] IPortfolioRepository portfolio,
         CancellationToken ct)
-        => await portfolio.GetLiquiditySignalsAsync(user.UserId, runId, ct);
+        => await portfolio.GetLiquiditySignalsAsync(user.UserId, runId, ruleset ?? "classic", ct);
 
     public async Task<IReadOnlyList<OpenPositionRow>> OpenPositions(
         [Service] ICurrentUserAccessor user,
@@ -79,13 +80,16 @@ public sealed class Query
     public async Task<BacktestSymbolSummary> BacktestSummary(
         Guid instrumentId,
         string? strategy,
+        double? minRiskReward,
         [Service] ICurrentUserAccessor user,
         [Service] IBacktestRepository backtest,
         CancellationToken ct)
     {
         try
         {
-            return await backtest.GetSymbolSummaryAsync(user.UserId, instrumentId, NormalizeStrategy(strategy), ct);
+            decimal? minRr = minRiskReward is null ? null : (decimal)minRiskReward.Value;
+            return await backtest.GetSymbolSummaryAsync(
+                user.UserId, instrumentId, NormalizeStrategy(strategy), minRr, ct);
         }
         catch (Exception ex)
         {
@@ -95,13 +99,16 @@ public sealed class Query
 
     public async Task<IReadOnlyList<BacktestSymbolSummary>> BacktestSummaries(
         string? strategy,
+        double? minRiskReward,
         [Service] ICurrentUserAccessor user,
         [Service] IBacktestRepository backtest,
         CancellationToken ct)
     {
         try
         {
-            return await backtest.GetSummariesAsync(user.UserId, NormalizeStrategy(strategy), ct);
+            decimal? minRr = minRiskReward is null ? null : (decimal)minRiskReward.Value;
+            return await backtest.GetSummariesAsync(
+                user.UserId, NormalizeStrategy(strategy), minRr, ct);
         }
         catch (Exception ex)
         {
@@ -113,7 +120,7 @@ public sealed class Query
     {
         if (string.IsNullOrWhiteSpace(strategy)) return null;
         var s = strategy.Trim().ToLowerInvariant();
-        return s is "signals" or "liquidity" ? s : null;
+        return s is "signals" or "liquidity" or "liquidity_fresh" ? s : null;
     }
 }
 
@@ -140,6 +147,7 @@ public sealed class Mutation
         bool includeNifty50,
         bool includeNifty100,
         bool includeWatchlist,
+        string? ruleset,
         [Service] ICurrentUserAccessor user,
         [Service] LiquidityAnalysisService analysis,
         CancellationToken ct)
@@ -149,7 +157,8 @@ public sealed class Mutation
             includeNifty100,
             includeWatchlist,
             "manual",
-            ct);
+            ct,
+            ruleset ?? "classic");
 
     public async Task<bool> AddToWatchlist(
         Guid instrumentId,

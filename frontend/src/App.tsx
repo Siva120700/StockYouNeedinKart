@@ -32,7 +32,8 @@ export default function App() {
               <Route path="/" element={<Navigate to="/ltp" replace />} />
               <Route path="/ltp" element={<LtpPage />} />
               <Route path="/signals" element={<SignalsPage />} />
-              <Route path="/liquidity" element={<LiquiditySignalsPage />} />
+              <Route path="/liquidity" element={<LiquiditySignalsPage ruleset="classic" />} />
+              <Route path="/liquidity-fresh" element={<LiquiditySignalsPage ruleset="fresh" />} />
               <Route path="/backtest" element={<BacktestPage />} />
               <Route path="/positions" element={<PositionsPage />} />
             </Routes>

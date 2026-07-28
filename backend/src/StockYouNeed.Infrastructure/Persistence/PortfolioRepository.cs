@@ -353,20 +353,21 @@ public sealed class PortfolioRepository : IPortfolioRepository
 
     public async Task<Guid> CreateLiquidityAnalysisRunAsync(
         Guid userId, string triggeredBy, bool nifty50, bool nifty100, bool watchlist, DateOnly asOfDate,
-        CancellationToken ct = default)
+        string ruleset = "classic", CancellationToken ct = default)
     {
+        ruleset = NormalizeLiquidityRuleset(ruleset);
         const string sql = """
             INSERT INTO liquidity_analysis_runs (
-              user_id, triggered_by, include_nifty50, include_nifty100, include_watchlist, as_of_date, status)
+              user_id, triggered_by, include_nifty50, include_nifty100, include_watchlist, as_of_date, status, ruleset)
             VALUES (
-              @userId, @triggeredBy, @nifty50, @nifty100, @watchlist, @asOfDate, 'running')
+              @userId, @triggeredBy, @nifty50, @nifty100, @watchlist, @asOfDate, 'running', @ruleset)
             RETURNING id
             """;
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, userId);
         return await conn.ExecuteScalarAsync<Guid>(new CommandDefinition(sql, new
         {
-            userId, triggeredBy, nifty50, nifty100, watchlist, asOfDate
+            userId, triggeredBy, nifty50, nifty100, watchlist, asOfDate, ruleset
         }, cancellationToken: ct));
     }
 
@@ -407,8 +408,10 @@ public sealed class PortfolioRepository : IPortfolioRepository
         await conn.ExecuteAsync(new CommandDefinition(sql, signal, cancellationToken: ct));
     }
 
-    public async Task<IReadOnlyList<LiquiditySignalRow>> GetLiquiditySignalsAsync(Guid userId, Guid? runId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<LiquiditySignalRow>> GetLiquiditySignalsAsync(
+        Guid userId, Guid? runId, string ruleset = "classic", CancellationToken ct = default)
     {
+        ruleset = NormalizeLiquidityRuleset(ruleset);
         const string sql = """
             SELECT
               s.id AS Id,
@@ -446,7 +449,9 @@ public sealed class PortfolioRepository : IPortfolioRepository
                   @runId IS NULL
                   AND s.liquidity_run_id = (
                     SELECT r.id FROM liquidity_analysis_runs r
-                    WHERE r.user_id = @userId AND r.status = 'succeeded'
+                    WHERE r.user_id = @userId
+                      AND r.status = 'succeeded'
+                      AND COALESCE(r.ruleset, 'classic') = @ruleset
                     ORDER BY r.started_at DESC
                     LIMIT 1
                   )
@@ -458,8 +463,14 @@ public sealed class PortfolioRepository : IPortfolioRepository
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, userId);
         var rows = await conn.QueryAsync<LiquiditySignalRow>(
-            new CommandDefinition(sql, new { userId, runId }, cancellationToken: ct));
+            new CommandDefinition(sql, new { userId, runId, ruleset }, cancellationToken: ct));
         return rows.ToList();
+    }
+
+    private static string NormalizeLiquidityRuleset(string? ruleset)
+    {
+        var s = (ruleset ?? "classic").Trim().ToLowerInvariant();
+        return s == "fresh" ? "fresh" : "classic";
     }
 
     public async Task<LiquiditySignalRow?> GetLiquiditySignalAsync(Guid signalId, Guid userId, CancellationToken ct = default)

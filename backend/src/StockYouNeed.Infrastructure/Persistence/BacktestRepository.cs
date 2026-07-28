@@ -99,7 +99,7 @@ public sealed class BacktestRepository : IBacktestRepository
     }
 
     public async Task<BacktestSymbolSummary> GetSymbolSummaryAsync(
-        Guid userId, Guid instrumentId, string? strategy, CancellationToken ct = default)
+        Guid userId, Guid instrumentId, string? strategy, decimal? minRiskReward = null, CancellationToken ct = default)
     {
         const string sql = """
             SELECT
@@ -119,19 +119,34 @@ public sealed class BacktestRepository : IBacktestRepository
                   / COUNT(n.instrument_id) FILTER (WHERE n.result IN ('target', 'sl')),
                   2)
               END AS TargetHitRatePct,
-              AVG(n.target_hit_pct) FILTER (WHERE n.target_hit_pct IS NOT NULL) AS AvgTargetHitPct
+              AVG(n.target_hit_pct) FILTER (WHERE n.target_hit_pct IS NOT NULL) AS AvgTargetHitPct,
+              AVG(
+                ABS(n.target_t1 - n.entry_price)
+                / NULLIF(ABS(n.entry_price - n.initial_stop_loss), 0)
+              ) FILTER (WHERE n.target_t1 IS NOT NULL) AS AvgRiskReward,
+              AVG(n.r_multiple) FILTER (WHERE n.r_multiple IS NOT NULL) AS AvgRMultiple
             FROM instruments i
             LEFT JOIN (
-              SELECT user_id, instrument_id, strategy, result, target_hit_pct
+              SELECT user_id, instrument_id, strategy, result, target_hit_pct,
+                     entry_price, initial_stop_loss, target_t1, r_multiple
               FROM backtest_notes
               WHERE COALESCE(NULLIF(source, ''), 'manual') <> 'auto'
               UNION ALL
-              SELECT user_id, instrument_id, strategy, result, target_hit_pct
+              SELECT user_id, instrument_id, strategy, result, target_hit_pct,
+                     entry_price, initial_stop_loss, target_t1, r_multiple
               FROM backtest_auto_notes
             ) n
               ON n.instrument_id = i.id
              AND n.user_id = @userId
              AND (@strategyFilter IS NULL OR n.strategy = @strategyFilter)
+             AND (
+               @minRiskReward IS NULL
+               OR (
+                 n.target_t1 IS NOT NULL
+                 AND ABS(n.entry_price - n.initial_stop_loss) > 0
+                 AND ABS(n.target_t1 - n.entry_price) / ABS(n.entry_price - n.initial_stop_loss) >= @minRiskReward
+               )
+             )
             WHERE i.id = @instrumentId
             GROUP BY i.symbol, i.name
             """;
@@ -139,7 +154,7 @@ public sealed class BacktestRepository : IBacktestRepository
         await SetUserAsync(conn, userId);
         var row = await conn.QuerySingleOrDefaultAsync<BacktestSymbolSummary>(new CommandDefinition(
             sql,
-            new { userId, instrumentId, strategy, strategyFilter = strategy },
+            new { userId, instrumentId, strategy, strategyFilter = strategy, minRiskReward },
             cancellationToken: ct));
         return row ?? new BacktestSymbolSummary
         {
@@ -149,7 +164,7 @@ public sealed class BacktestRepository : IBacktestRepository
     }
 
     public async Task<IReadOnlyList<BacktestSymbolSummary>> GetSummariesAsync(
-        Guid userId, string? strategy, CancellationToken ct = default)
+        Guid userId, string? strategy, decimal? minRiskReward = null, CancellationToken ct = default)
     {
         const string sql = """
             SELECT
@@ -169,26 +184,42 @@ public sealed class BacktestRepository : IBacktestRepository
                   / COUNT(*) FILTER (WHERE n.result IN ('target', 'sl')),
                   2)
               END AS TargetHitRatePct,
-              AVG(n.target_hit_pct) FILTER (WHERE n.target_hit_pct IS NOT NULL) AS AvgTargetHitPct
+              AVG(n.target_hit_pct) FILTER (WHERE n.target_hit_pct IS NOT NULL) AS AvgTargetHitPct,
+              AVG(
+                ABS(n.target_t1 - n.entry_price)
+                / NULLIF(ABS(n.entry_price - n.initial_stop_loss), 0)
+              ) FILTER (WHERE n.target_t1 IS NOT NULL) AS AvgRiskReward,
+              AVG(n.r_multiple) FILTER (WHERE n.r_multiple IS NOT NULL) AS AvgRMultiple
             FROM (
-              SELECT user_id, instrument_id, strategy, result, target_hit_pct
+              SELECT user_id, instrument_id, strategy, result, target_hit_pct,
+                     entry_price, initial_stop_loss, target_t1, r_multiple
               FROM backtest_notes
               WHERE COALESCE(NULLIF(source, ''), 'manual') <> 'auto'
               UNION ALL
-              SELECT user_id, instrument_id, strategy, result, target_hit_pct
+              SELECT user_id, instrument_id, strategy, result, target_hit_pct,
+                     entry_price, initial_stop_loss, target_t1, r_multiple
               FROM backtest_auto_notes
             ) n
             JOIN instruments i ON i.id = n.instrument_id
             WHERE n.user_id = @userId
               AND (@strategyFilter IS NULL OR n.strategy = @strategyFilter)
+              AND (
+                @minRiskReward IS NULL
+                OR (
+                  n.target_t1 IS NOT NULL
+                  AND ABS(n.entry_price - n.initial_stop_loss) > 0
+                  AND ABS(n.target_t1 - n.entry_price) / ABS(n.entry_price - n.initial_stop_loss) >= @minRiskReward
+                )
+              )
             GROUP BY i.id, i.symbol, i.name, n.strategy
+            HAVING COUNT(*) > 0
             ORDER BY i.symbol, n.strategy
             """;
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, userId);
         var rows = await conn.QueryAsync<BacktestSymbolSummary>(new CommandDefinition(
             sql,
-            new { userId, strategyFilter = strategy },
+            new { userId, strategyFilter = strategy, minRiskReward },
             cancellationToken: ct));
         return rows.ToList();
     }
@@ -330,8 +361,8 @@ public sealed class BacktestRepository : IBacktestRepository
     private static void NormalizeNote(BacktestNoteRow note)
     {
         note.Strategy = note.Strategy.Trim().ToLowerInvariant();
-        if (note.Strategy is not ("signals" or "liquidity"))
-            throw new ArgumentException("Strategy must be 'signals' or 'liquidity'.");
+        if (note.Strategy is not ("signals" or "liquidity" or "liquidity_fresh"))
+            throw new ArgumentException("Strategy must be 'signals', 'liquidity', or 'liquidity_fresh'.");
 
         note.Side = note.Side.Trim().ToLowerInvariant();
         if (note.Side is not ("buy" or "sell"))

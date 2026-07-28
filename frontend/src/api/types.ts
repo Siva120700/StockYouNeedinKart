@@ -123,6 +123,10 @@ export type BacktestSymbolSummary = {
   openCount: number;
   targetHitRatePct?: number | null;
   avgTargetHitPct?: number | null;
+  /** Average planned R:R (|T1−entry| / |entry−SL|). */
+  avgRiskReward?: number | null;
+  /** Average realized R-multiple from outcomes. */
+  avgRMultiple?: number | null;
 };
 
 export type BacktestNoteInput = {

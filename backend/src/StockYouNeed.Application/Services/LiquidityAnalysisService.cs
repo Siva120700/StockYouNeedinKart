@@ -64,11 +64,13 @@ public sealed class LiquidityAnalysisService
         bool includeNifty100,
         bool includeWatchlist,
         string triggeredBy,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string ruleset = "classic")
     {
+        ruleset = ruleset.Trim().ToLowerInvariant() == "fresh" ? "fresh" : "classic";
         var asOf = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
         var runId = await _portfolio.CreateLiquidityAnalysisRunAsync(
-            userId, triggeredBy, includeNifty50, includeNifty100, includeWatchlist, asOf, ct);
+            userId, triggeredBy, includeNifty50, includeNifty100, includeWatchlist, asOf, ruleset, ct);
 
         var stats = new Dictionary<string, object>
         {
@@ -77,7 +79,8 @@ public sealed class LiquidityAnalysisService
             ["sectorConfirmed"] = 0,
             ["fewIntradayBars"] = 0,
             ["noSetup"] = 0,
-            ["intradayBarsUpserted"] = 0
+            ["intradayBarsUpserted"] = 0,
+            ["ruleset"] = ruleset
         };
 
         try
@@ -160,7 +163,8 @@ public sealed class LiquidityAnalysisService
 
                 var signal = TryEvaluate(
                     userId, runId, asOf, token, bars1h, bars4h, daily.ToList(),
-                    ltp > 0 ? ltp : null);
+                    ltp > 0 ? ltp : null,
+                    ruleset);
 
                 if (signal is null)
                 {
@@ -194,8 +198,8 @@ public sealed class LiquidityAnalysisService
 
             await _portfolio.CompleteLiquidityAnalysisRunAsync(runId, "succeeded", null, stats, ct);
             _logger.LogInformation(
-                "Liquidity run {RunId}: scanned={Scanned}, signals={Signals}, sectorConfirmed={SectorConfirmed}, fewBars={Few}, noSetup={No}",
-                runId, scanned, signals, sectorConfirmedCount, fewBars, noSetup);
+                "Liquidity run {RunId} ({Ruleset}): scanned={Scanned}, signals={Signals}, sectorConfirmed={SectorConfirmed}, fewBars={Few}, noSetup={No}",
+                runId, ruleset, scanned, signals, sectorConfirmedCount, fewBars, noSetup);
 
             return new AnalysisRunRow
             {
@@ -217,7 +221,7 @@ public sealed class LiquidityAnalysisService
         }
     }
 
-    /// <summary>Public for historical backtest replay — same rules as live liquidity run.</summary>
+    /// <summary>Public for historical backtest replay — classic or fresh ruleset.</summary>
     public static LiquiditySignalRow? TryEvaluate(
         Guid userId,
         Guid runId,
@@ -226,15 +230,18 @@ public sealed class LiquidityAnalysisService
         List<MarketIntradayBarRow> bars1hNewestFirst,
         List<Ohlcv> bars4hNewestFirst,
         List<MarketBarRow> dailyNewestFirst,
-        decimal? livePrice)
+        decimal? livePrice,
+        string ruleset = "classic")
     {
+        var fresh = ruleset.Trim().ToLowerInvariant() == "fresh";
+        var confirmWindow = fresh ? 4 : 10;
+
         // Look back a few 4H bars so weekend / late-session still finds recent sweeps.
         var sweep = Detect4hSweep(bars4hNewestFirst, dailyNewestFirst, maxBars: 4);
         if (sweep is null)
             return null;
 
-        // Confirm on a 1H bar at/after the sweep (search last ~10 hours).
-        for (var i = 0; i < Math.Min(10, bars1hNewestFirst.Count - 2); i++)
+        for (var i = 0; i < Math.Min(confirmWindow, bars1hNewestFirst.Count - 2); i++)
         {
             var bar = bars1hNewestFirst[i];
             if (bar.BarTime < sweep.BarTime)
@@ -246,7 +253,10 @@ public sealed class LiquidityAnalysisService
 
             var last2High = prev1h.Max(b => b.High);
             var last2Low = prev1h.Min(b => b.Low);
-            var price = i == 0 && livePrice is > 0 ? livePrice.Value : bar.Close;
+            // Classic: price on confirm bar (LTP only on newest). Fresh: always latest mark.
+            var price = fresh
+                ? (livePrice is > 0 ? livePrice.Value : bars1hNewestFirst[0].Close)
+                : (i == 0 && livePrice is > 0 ? livePrice.Value : bar.Close);
 
             var buyBreak = bar.High > last2High;
             var sellBreak = bar.Low < last2Low;
@@ -280,6 +290,34 @@ public sealed class LiquidityAnalysisService
 
             var zones = BuildZones(bars4hNewestFirst, dailyNewestFirst, entry);
             var targets = PickStructureTargets(side, entry, sl, zones);
+
+            if (fresh && targets.Count > 0)
+            {
+                var t1 = targets[0];
+                var mark = price;
+                var t1Already = side == SignalSides.Buy ? mark >= t1 : mark <= t1;
+                if (t1Already)
+                    continue;
+
+                var staleAfterConfirm = false;
+                for (var j = 0; j < i; j++)
+                {
+                    var newer = bars1hNewestFirst[j];
+                    if (side == SignalSides.Buy && newer.High >= t1)
+                    {
+                        staleAfterConfirm = true;
+                        break;
+                    }
+                    if (side == SignalSides.Sell && newer.Low <= t1)
+                    {
+                        staleAfterConfirm = true;
+                        break;
+                    }
+                }
+                if (staleAfterConfirm)
+                    continue;
+            }
+
             var nearest = NearestZone(price, zones);
 
             return new LiquiditySignalRow
@@ -300,7 +338,7 @@ public sealed class LiquidityAnalysisService
                 RvolPercentile = Math.Round((decimal)rvolPctile, 4),
                 RvolOk = true,
                 StrongClose = true,
-                SectorConfirmed = false, // overwritten after Evaluate
+                SectorConfirmed = false,
                 SweepSide = side,
                 SweptZoneType = sweep.ZoneType,
                 SweptZonePrice = RoundPrice(sweep.ZonePrice),
@@ -310,7 +348,7 @@ public sealed class LiquidityAnalysisService
                     ? null
                     : Math.Round(Math.Abs(price - nearest.Price) / price, 6),
                 ZoneTags = zones.Select(z => z.Type).Distinct().Take(12).ToArray(),
-                TimeframeContext = "4h_sweep+1h_confirm"
+                TimeframeContext = fresh ? "4h_sweep+1h_confirm_fresh" : "4h_sweep+1h_confirm"
             };
         }
 

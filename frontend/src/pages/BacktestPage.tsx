@@ -33,7 +33,7 @@ import {
   type ExportColumn,
 } from "../utils/exportTable";
 
-type StrategyFilter = "all" | "signals" | "liquidity";
+type StrategyFilter = "all" | "signals" | "liquidity" | "liquidity_fresh";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -64,6 +64,7 @@ function emptyForm(instrumentId: string): BacktestNoteInput {
 }
 
 function strategyLabel(strategy: string | null | undefined): string {
+  if (strategy === "liquidity_fresh") return "Liquidity Fresh";
   if (strategy === "liquidity") return "Liquidity";
   if (strategy === "signals") return "Signals";
   return strategy ?? "";
@@ -73,13 +74,17 @@ function summaryRowId(row: BacktestSymbolSummary): string {
   return `${row.instrumentId}-${row.strategyFilter ?? "unknown"}`;
 }
 
-function strategiesForFilter(filter: StrategyFilter): readonly ("signals" | "liquidity")[] {
-  return filter === "all" ? (["signals", "liquidity"] as const) : ([filter] as const);
+type BacktestStrategy = "signals" | "liquidity" | "liquidity_fresh";
+
+function strategiesForFilter(filter: StrategyFilter): readonly BacktestStrategy[] {
+  return filter === "all"
+    ? (["signals", "liquidity", "liquidity_fresh"] as const)
+    : ([filter] as const);
 }
 
 function isStockCompleted(
   instrumentId: string,
-  strategies: readonly ("signals" | "liquidity")[],
+  strategies: readonly BacktestStrategy[],
   summaries: BacktestSymbolSummary[],
 ): boolean {
   return strategies.every((s) =>
@@ -102,7 +107,7 @@ function mergeSummary(
   });
 }
 
-/** Portfolio hit rate: total targets / (targets + SLs), not average of averages. */
+/** Portfolio aggregates from visible rows (setup-weighted where needed). */
 function aggregateStats(rows: BacktestSymbolSummary[]) {
   const setups = rows.reduce((s, r) => s + (r.timesInStrategy || 0), 0);
   const targetHits = rows.reduce((s, r) => s + (r.targetHits || 0), 0);
@@ -112,14 +117,26 @@ function aggregateStats(rows: BacktestSymbolSummary[]) {
 
   let weightedTargetPctSum = 0;
   let weightedTargetPctWeight = 0;
+  let weightedRrSum = 0;
+  let weightedRrWeight = 0;
+  let weightedRSum = 0;
+  let weightedRWeight = 0;
+
   for (const r of rows) {
-    if (r.avgTargetHitPct == null || !Number.isFinite(Number(r.avgTargetHitPct))) continue;
     const w = Math.max(1, r.timesInStrategy || 0);
-    weightedTargetPctSum += Number(r.avgTargetHitPct) * w;
-    weightedTargetPctWeight += w;
+    if (r.avgTargetHitPct != null && Number.isFinite(Number(r.avgTargetHitPct))) {
+      weightedTargetPctSum += Number(r.avgTargetHitPct) * w;
+      weightedTargetPctWeight += w;
+    }
+    if (r.avgRiskReward != null && Number.isFinite(Number(r.avgRiskReward))) {
+      weightedRrSum += Number(r.avgRiskReward) * w;
+      weightedRrWeight += w;
+    }
+    if (r.avgRMultiple != null && Number.isFinite(Number(r.avgRMultiple))) {
+      weightedRSum += Number(r.avgRMultiple) * w;
+      weightedRWeight += w;
+    }
   }
-  const avgTargetPct =
-    weightedTargetPctWeight > 0 ? weightedTargetPctSum / weightedTargetPctWeight : null;
 
   return {
     stocks: rows.length,
@@ -127,7 +144,10 @@ function aggregateStats(rows: BacktestSymbolSummary[]) {
     targetHits,
     slHits,
     avgHitRatePct,
-    avgTargetPct,
+    avgTargetPct:
+      weightedTargetPctWeight > 0 ? weightedTargetPctSum / weightedTargetPctWeight : null,
+    avgRiskReward: weightedRrWeight > 0 ? weightedRrSum / weightedRrWeight : null,
+    avgRMultiple: weightedRWeight > 0 ? weightedRSum / weightedRWeight : null,
   };
 }
 
@@ -190,6 +210,28 @@ const summaryColumns: ColumnConfig<BacktestSymbolSummary>[] = [
     displayRenderer: (v) =>
       v != null && Number.isFinite(Number(v)) ? `${Number(v).toFixed(0)}%` : "—",
   }),
+  columnFactories.createTextColumn<BacktestSymbolSummary>({
+    field: "avgRiskReward",
+    headerName: "Avg R:R",
+    width: 90,
+    getValue: (r) =>
+      r.avgRiskReward != null && Number.isFinite(Number(r.avgRiskReward))
+        ? Number(r.avgRiskReward)
+        : null,
+    displayRenderer: (v) =>
+      v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(2) : "—",
+  }),
+  columnFactories.createTextColumn<BacktestSymbolSummary>({
+    field: "avgRMultiple",
+    headerName: "Avg R",
+    width: 80,
+    getValue: (r) =>
+      r.avgRMultiple != null && Number.isFinite(Number(r.avgRMultiple))
+        ? Number(r.avgRMultiple)
+        : null,
+    displayRenderer: (v) =>
+      v != null && Number.isFinite(Number(v)) ? Number(v).toFixed(2) : "—",
+  }),
 ];
 
 const backtestExportColumns: ExportColumn<BacktestSymbolSummary>[] = [
@@ -209,6 +251,16 @@ const backtestExportColumns: ExportColumn<BacktestSymbolSummary>[] = [
     value: (r) =>
       r.avgTargetHitPct != null ? Number(r.avgTargetHitPct).toFixed(0) : "",
   },
+  {
+    header: "Avg R:R",
+    value: (r) =>
+      r.avgRiskReward != null ? Number(r.avgRiskReward).toFixed(2) : "",
+  },
+  {
+    header: "Avg R",
+    value: (r) =>
+      r.avgRMultiple != null ? Number(r.avgRMultiple).toFixed(2) : "",
+  },
 ];
 
 export default function BacktestPage() {
@@ -219,7 +271,10 @@ export default function BacktestPage() {
   const [runTarget, setRunTarget] = useState<UniverseInstrument | null>(null);
   const [strategyFilter, setStrategyFilter] = useState<StrategyFilter>(() => {
     const saved = sessionStorage.getItem("backtest.strategyFilter");
-    return saved === "signals" || saved === "liquidity" || saved === "all"
+    return saved === "signals" ||
+      saved === "liquidity" ||
+      saved === "liquidity_fresh" ||
+      saved === "all"
       ? saved
       : "all";
   });
@@ -230,6 +285,10 @@ export default function BacktestPage() {
   const [running, setRunning] = useState(false);
   const [runningAll, setRunningAll] = useState(false);
   const [skipCompleted, setSkipCompleted] = useState(true);
+  const [riskRewardCheck, setRiskRewardCheck] = useState(() => {
+    const saved = sessionStorage.getItem("backtest.riskRewardCheck");
+    return saved !== "false";
+  });
   const [batchProgress, setBatchProgress] = useState<{
     current: number;
     total: number;
@@ -248,7 +307,8 @@ export default function BacktestPage() {
     setError(null);
     try {
       const strat = strategyFilter === "all" ? null : strategyFilter;
-      const rows = await DataFactory.backtestSummaries(strat);
+      const minRr = riskRewardCheck ? 1 : null;
+      const rows = await DataFactory.backtestSummaries(strat, minRr);
       setSummaries(rows);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -256,7 +316,7 @@ export default function BacktestPage() {
       setIsSyncing(false);
       setLoading(false);
     }
-  }, [strategyFilter, setIsSyncing]);
+  }, [strategyFilter, riskRewardCheck, setIsSyncing]);
 
   useEffect(() => {
     setTitle("Backtest");
@@ -411,11 +471,9 @@ export default function BacktestPage() {
     const filterLabel =
       strategyFilter === "all"
         ? "All strategies"
-        : strategyFilter === "liquidity"
-          ? "Liquidity"
-          : "Signals";
+        : strategyLabel(strategyFilter);
     downloadPdfTable({
-      title: `Backtest 1Y · ${filterLabel}`,
+      title: `Backtest 1Y · ${filterLabel}${riskRewardCheck ? " · R:R ≥ 1" : ""}`,
       fileName: exportStamp("backtest", "pdf"),
       columns: backtestExportColumns,
       rows: visibleRows,
@@ -433,6 +491,16 @@ export default function BacktestPage() {
           label: "Avg target %",
           value:
             stats.avgTargetPct != null ? `${stats.avgTargetPct.toFixed(0)}%` : "—",
+        },
+        {
+          label: "Avg R:R",
+          value:
+            stats.avgRiskReward != null ? stats.avgRiskReward.toFixed(2) : "—",
+        },
+        {
+          label: "Avg R",
+          value:
+            stats.avgRMultiple != null ? stats.avgRMultiple.toFixed(2) : "—",
         },
       ],
     });
@@ -491,6 +559,7 @@ export default function BacktestPage() {
               <MenuItem value="all">All</MenuItem>
               <MenuItem value="signals">Signals</MenuItem>
               <MenuItem value="liquidity">Liquidity</MenuItem>
+              <MenuItem value="liquidity_fresh">Liquidity Fresh</MenuItem>
             </Select>
           </FormControl>
           <Autocomplete
@@ -515,12 +584,12 @@ export default function BacktestPage() {
             onClick={() => void onRunHistorical()}
           >
             {running
-              ? strategyFilter === "liquidity" || strategyFilter === "all"
-                ? "Running 1Y… (may take a few min)"
-                : "Running 1Y…"
+              ? strategyFilter === "signals"
+                ? "Running 1Y…"
+                : "Running 1Y… (may take a few min)"
               : strategyFilter === "all"
-                ? "Run 1Y (both)"
-                : "Run 1Y backtest"}
+                ? "Run 1Y (all strategies)"
+                : `Run 1Y ${strategyLabel(strategyFilter).toLowerCase()}`}
           </Button>
           <Button
             size="small"
@@ -529,8 +598,27 @@ export default function BacktestPage() {
             startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
             onClick={() => void onRunAllHistorical()}
           >
-            {runningAll ? "Running all…" : "Run all 1Y"}
+            {runningAll
+              ? "Running all…"
+              : strategyFilter === "all"
+                ? "Run all 1Y"
+                : `Run all ${strategyLabel(strategyFilter).toLowerCase()} 1Y`}
           </Button>
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={riskRewardCheck}
+                disabled={runningAll}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setRiskRewardCheck(next);
+                  sessionStorage.setItem("backtest.riskRewardCheck", String(next));
+                }}
+              />
+            }
+            label="R:R ≥ 1"
+          />
           <FormControlLabel
             control={
               <Switch
@@ -592,6 +680,18 @@ export default function BacktestPage() {
               stats.avgTargetPct != null ? `${stats.avgTargetPct.toFixed(0)}%` : "—"
             }
           />
+          <Stat
+            label="Avg R:R"
+            value={
+              stats.avgRiskReward != null ? stats.avgRiskReward.toFixed(2) : "—"
+            }
+          />
+          <Stat
+            label="Avg R"
+            value={
+              stats.avgRMultiple != null ? stats.avgRMultiple.toFixed(2) : "—"
+            }
+          />
         </Box>
       </Box>
 
@@ -647,6 +747,7 @@ export default function BacktestPage() {
                 >
                   <MenuItem value="signals">Signals</MenuItem>
                   <MenuItem value="liquidity">Liquidity</MenuItem>
+                  <MenuItem value="liquidity_fresh">Liquidity Fresh</MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" sx={{ minWidth: 100 }}>

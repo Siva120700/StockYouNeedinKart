@@ -42,8 +42,8 @@ public sealed class BacktestService
         CancellationToken ct = default)
     {
         strategy = strategy.Trim().ToLowerInvariant();
-        if (strategy is not ("signals" or "liquidity"))
-            throw new ArgumentException("Strategy must be 'signals' or 'liquidity'.");
+        if (strategy is not ("signals" or "liquidity" or "liquidity_fresh"))
+            throw new ArgumentException("Strategy must be 'signals', 'liquidity', or 'liquidity_fresh'.");
 
         if (!_options.Enabled)
             throw new InvalidOperationException("Angel is disabled; cannot fetch historical candles.");
@@ -59,7 +59,7 @@ public sealed class BacktestService
         if (strategy == "signals")
             notes = await ReplaySignalsAsync(userId, token, fromIst, toIst, ct);
         else
-            notes = await ReplayLiquidityAsync(userId, token, fromIst, toIst, ct);
+            notes = await ReplayLiquidityAsync(userId, token, fromIst, toIst, ct, strategy);
 
         await _backtest.DeleteAutoNotesAsync(userId, instrumentId, strategy, ct);
         await _backtest.InsertAutoNotesAsync(notes, ct);
@@ -68,7 +68,22 @@ public sealed class BacktestService
             "Historical backtest {Strategy} {Symbol}: {Count} setups over 1Y",
             strategy, token.AppSymbol, notes.Count);
 
-        return await _backtest.GetSymbolSummaryAsync(userId, instrumentId, strategy, ct);
+        return await _backtest.GetSymbolSummaryAsync(userId, instrumentId, strategy, ct: ct);
+    }
+
+    /// <summary>Planned R:R using T1 vs stop. Null when not computable.</summary>
+    private static decimal? PlannedRiskReward(decimal entry, decimal sl, decimal? t1)
+    {
+        if (t1 is null) return null;
+        var risk = Math.Abs(entry - sl);
+        if (risk <= 0) return null;
+        return Math.Abs(t1.Value - entry) / risk;
+    }
+
+    private static bool MeetsMinRiskReward(decimal entry, decimal sl, decimal? t1, decimal min = 1m)
+    {
+        var rr = PlannedRiskReward(entry, sl, t1);
+        return rr is decimal v && v >= min;
     }
 
     private async Task<List<BacktestNoteRow>> ReplaySignalsAsync(
@@ -110,6 +125,9 @@ public sealed class BacktestService
             if (signal is null)
                 continue;
 
+            if (!MeetsMinRiskReward(signal.EntryPrice, signal.InitialStopLoss, signal.TargetT1))
+                continue;
+
             var forward = bars.Skip(i + 1).Take(DailyTimeStopBars).ToList();
             var outcome = SimulateOutcome(
                 signal.Side, signal.EntryPrice, signal.InitialStopLoss,
@@ -125,8 +143,10 @@ public sealed class BacktestService
     }
 
     private async Task<List<BacktestNoteRow>> ReplayLiquidityAsync(
-        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct)
+        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct,
+        string strategy = "liquidity")
     {
+        var ruleset = strategy == "liquidity_fresh" ? "fresh" : "classic";
         var hourly = await FetchHourlyChunkedAsync(token, fromIst, toIst, ct);
         var dailyCandles = await FetchDailyChunkedAsync(token, fromIst, toIst, ct);
 
@@ -190,8 +210,15 @@ public sealed class BacktestService
                 .ToList();
 
             var signal = LiquidityAnalysisService.TryEvaluate(
-                userId, runId, asOfDate, token, bars1hNewest, bars4h, dailyNewest, livePrice: null);
+                userId, runId, asOfDate, token, bars1hNewest, bars4h, dailyNewest, livePrice: null, ruleset);
             if (signal is null)
+                continue;
+
+            if (!MeetsMinRiskReward(signal.EntryPrice, signal.InitialStopLoss, signal.TargetT1))
+                continue;
+
+            // Fresh ruleset only: drop if as-of bar already tagged T1.
+            if (ruleset == "fresh" && SignalBarAlreadyHitTarget(signal.Side, signal.TargetT1, asOfBar))
                 continue;
 
             // De-dupe: skip if same side within 6 hours of last note
@@ -214,7 +241,7 @@ public sealed class BacktestService
                 signal.Side, signal.EntryPrice, signal.InitialStopLoss,
                 signal.TargetT1, signal.TargetT2, signal.TargetT3, forward);
 
-            notes.Add(ToNote(userId, token, "liquidity", signal.Side, asOfDate,
+            notes.Add(ToNote(userId, token, strategy, signal.Side, asOfDate,
                 signal.EntryPrice, signal.InitialStopLoss,
                 signal.TargetT1, signal.TargetT2, signal.TargetT3, outcome));
         }
@@ -249,6 +276,16 @@ public sealed class BacktestService
             Notes = "auto:1y",
             Source = "auto"
         };
+    }
+
+    /// <summary>True when planned T1 was already traded on the signal bar (not actionable).</summary>
+    private static bool SignalBarAlreadyHitTarget(
+        string side, decimal? t1, MarketIntradayBarRow bar)
+    {
+        if (t1 is null) return false;
+        return side == SignalSides.Buy
+            ? bar.High >= t1 || bar.Close >= t1
+            : bar.Low <= t1 || bar.Close <= t1;
     }
 
     private sealed record Outcome(

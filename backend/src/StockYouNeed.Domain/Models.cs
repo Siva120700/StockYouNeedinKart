@@ -223,4 +223,8 @@ public sealed class BacktestSymbolSummary
     public int OpenCount { get; set; }
     public decimal? TargetHitRatePct { get; set; }
     public decimal? AvgTargetHitPct { get; set; }
+    /// <summary>Average planned reward:risk using T1 vs stop (|T1−entry| / |entry−SL|).</summary>
+    public decimal? AvgRiskReward { get; set; }
+    /// <summary>Average realized R-multiple from trade outcomes.</summary>
+    public decimal? AvgRMultiple { get; set; }
 }

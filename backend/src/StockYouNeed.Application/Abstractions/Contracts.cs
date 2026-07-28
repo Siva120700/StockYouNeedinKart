@@ -117,10 +117,13 @@ public interface IPortfolioRepository
     Task CompleteAnalysisRunAsync(Guid runId, string status, string? error, object stats, CancellationToken ct = default);
     Task InsertSignalAsync(AnalysisSignalRow signal, CancellationToken ct = default);
     Task<AnalysisSignalRow?> GetSignalAsync(Guid signalId, Guid userId, CancellationToken ct = default);
-    Task<Guid> CreateLiquidityAnalysisRunAsync(Guid userId, string triggeredBy, bool nifty50, bool nifty100, bool watchlist, DateOnly asOfDate, CancellationToken ct = default);
+    Task<Guid> CreateLiquidityAnalysisRunAsync(
+        Guid userId, string triggeredBy, bool nifty50, bool nifty100, bool watchlist, DateOnly asOfDate,
+        string ruleset = "classic", CancellationToken ct = default);
     Task CompleteLiquidityAnalysisRunAsync(Guid runId, string status, string? error, object stats, CancellationToken ct = default);
     Task InsertLiquiditySignalAsync(LiquiditySignalRow signal, CancellationToken ct = default);
-    Task<IReadOnlyList<LiquiditySignalRow>> GetLiquiditySignalsAsync(Guid userId, Guid? runId, CancellationToken ct = default);
+    Task<IReadOnlyList<LiquiditySignalRow>> GetLiquiditySignalsAsync(
+        Guid userId, Guid? runId, string ruleset = "classic", CancellationToken ct = default);
     Task<LiquiditySignalRow?> GetLiquiditySignalAsync(Guid signalId, Guid userId, CancellationToken ct = default);
     Task<Guid> OpenPositionFromLiquiditySignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default);
     Task<Guid> OpenPositionFromSignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default);
@@ -136,10 +139,10 @@ public interface IBacktestRepository
         Guid userId, Guid? instrumentId, string? strategy, CancellationToken ct = default);
 
     Task<BacktestSymbolSummary> GetSymbolSummaryAsync(
-        Guid userId, Guid instrumentId, string? strategy, CancellationToken ct = default);
+        Guid userId, Guid instrumentId, string? strategy, decimal? minRiskReward = null, CancellationToken ct = default);
 
     Task<IReadOnlyList<BacktestSymbolSummary>> GetSummariesAsync(
-        Guid userId, string? strategy, CancellationToken ct = default);
+        Guid userId, string? strategy, decimal? minRiskReward = null, CancellationToken ct = default);
 
     Task<BacktestNoteRow> UpsertNoteAsync(BacktestNoteRow note, CancellationToken ct = default);
 

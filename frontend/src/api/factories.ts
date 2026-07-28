@@ -53,10 +53,10 @@ export const DataFactory = {
     return data.signals;
   },
 
-  async liquiditySignals(runId?: string): Promise<LiquiditySignal[]> {
+  async liquiditySignals(runId?: string, ruleset: "classic" | "fresh" = "classic"): Promise<LiquiditySignal[]> {
     const data = await gql<{ liquiditySignals: LiquiditySignal[] }>(
-      `query ($runId: UUID) {
-        liquiditySignals(runId: $runId) {
+      `query ($runId: UUID, $ruleset: String) {
+        liquiditySignals(runId: $runId, ruleset: $ruleset) {
           id liquidityRunId instrumentId appSymbol instrumentName side
           entryPrice initialStopLoss targetT1 targetT2 targetT3
           relativeVolume rvolPercentile rvolOk strongClose sectorConfirmed
@@ -64,7 +64,7 @@ export const DataFactory = {
           nearestZoneType nearestZonePrice distancePct timeframeContext
         }
       }`,
-      { runId: runId ?? null },
+      { runId: runId ?? null, ruleset },
     );
     return data.liquiditySignals;
   },
@@ -100,30 +100,41 @@ export const DataFactory = {
     return data.backtestNotes;
   },
 
-  async backtestSummary(instrumentId: string, strategy?: string | null): Promise<BacktestSymbolSummary> {
+  async backtestSummary(
+    instrumentId: string,
+    strategy?: string | null,
+    minRiskReward?: number | null,
+  ): Promise<BacktestSymbolSummary> {
     const data = await gql<{ backtestSummary: BacktestSymbolSummary }>(
-      `query ($instrumentId: UUID!, $strategy: String) {
-        backtestSummary(instrumentId: $instrumentId, strategy: $strategy) {
+      `query ($instrumentId: UUID!, $strategy: String, $minRiskReward: Float) {
+        backtestSummary(instrumentId: $instrumentId, strategy: $strategy, minRiskReward: $minRiskReward) {
           instrumentId appSymbol instrumentName strategyFilter
           timesInStrategy targetHits slHits skipped openCount
-          targetHitRatePct avgTargetHitPct
+          targetHitRatePct avgTargetHitPct avgRiskReward avgRMultiple
         }
       }`,
-      { instrumentId, strategy: strategy ?? null },
+      {
+        instrumentId,
+        strategy: strategy ?? null,
+        minRiskReward: minRiskReward ?? null,
+      },
     );
     return data.backtestSummary;
   },
 
-  async backtestSummaries(strategy?: string | null): Promise<BacktestSymbolSummary[]> {
+  async backtestSummaries(
+    strategy?: string | null,
+    minRiskReward?: number | null,
+  ): Promise<BacktestSymbolSummary[]> {
     const data = await gql<{ backtestSummaries: BacktestSymbolSummary[] }>(
-      `query ($strategy: String) {
-        backtestSummaries(strategy: $strategy) {
+      `query ($strategy: String, $minRiskReward: Float) {
+        backtestSummaries(strategy: $strategy, minRiskReward: $minRiskReward) {
           instrumentId appSymbol instrumentName strategyFilter
           timesInStrategy targetHits slHits skipped openCount
-          targetHitRatePct avgTargetHitPct
+          targetHitRatePct avgTargetHitPct avgRiskReward avgRMultiple
         }
       }`,
-      { strategy: strategy ?? null },
+      { strategy: strategy ?? null, minRiskReward: minRiskReward ?? null },
     );
     return data.backtestSummaries;
   },
@@ -141,14 +152,15 @@ export const ActionFactory = {
     return data.runAnalysis;
   },
 
-  async runLiquidityAnalysis(): Promise<AnalysisRun> {
-    const data = await gql<{ runLiquidityAnalysis: AnalysisRun }>(`
-      mutation {
-        runLiquidityAnalysis(includeNifty50: true, includeNifty100: true, includeWatchlist: true) {
+  async runLiquidityAnalysis(ruleset: "classic" | "fresh" = "classic"): Promise<AnalysisRun> {
+    const data = await gql<{ runLiquidityAnalysis: AnalysisRun }>(
+      `mutation ($ruleset: String) {
+        runLiquidityAnalysis(includeNifty50: true, includeNifty100: true, includeWatchlist: true, ruleset: $ruleset) {
           id status asOfDate
         }
-      }
-    `);
+      }`,
+      { ruleset },
+    );
     return data.runLiquidityAnalysis;
   },
 
@@ -225,7 +237,7 @@ export const ActionFactory = {
         runHistoricalBacktest(instrumentId: $instrumentId, strategy: $strategy) {
           instrumentId appSymbol instrumentName strategyFilter
           timesInStrategy targetHits slHits skipped openCount
-          targetHitRatePct avgTargetHitPct
+          targetHitRatePct avgTargetHitPct avgRiskReward avgRMultiple
         }
       }`,
       { instrumentId, strategy },

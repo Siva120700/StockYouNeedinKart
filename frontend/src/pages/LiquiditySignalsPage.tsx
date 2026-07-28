@@ -76,7 +76,13 @@ const liquidityExportColumns: ExportColumn<ScoredLiquiditySignal>[] = [
   { header: "Sector", value: (r) => (r.sectorConfirmed ? "Yes" : "No") },
 ];
 
-export default function LiquiditySignalsPage() {
+export type LiquidityRuleset = "classic" | "fresh";
+
+export default function LiquiditySignalsPage({
+  ruleset = "classic",
+}: {
+  ruleset?: LiquidityRuleset;
+}) {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [rows, setRows] = useState<LiquiditySignal[]>([]);
@@ -86,11 +92,14 @@ export default function LiquiditySignalsPage() {
   const [riskRewardCheck, setRiskRewardCheck] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const pageTitle = ruleset === "fresh" ? "Liquidity Fresh" : "Liquidity";
+  const exportBase = ruleset === "fresh" ? "liquidity-fresh" : "liquidity";
+
   async function refresh() {
     setError(null);
     setIsSyncing(true);
     try {
-      setRows(await DataFactory.liquiditySignals());
+      setRows(await DataFactory.liquiditySignals(undefined, ruleset));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -103,7 +112,7 @@ export default function LiquiditySignalsPage() {
     setRunning(true);
     setError(null);
     try {
-      await ActionFactory.runLiquidityAnalysis();
+      await ActionFactory.runLiquidityAnalysis(ruleset);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -191,8 +200,8 @@ export default function LiquiditySignalsPage() {
 
   function onExportPdf() {
     downloadPdfTable({
-      title: "Liquidity Signals",
-      fileName: exportStamp("liquidity", "pdf"),
+      title: `${pageTitle} Signals`,
+      fileName: exportStamp(exportBase, "pdf"),
       columns: liquidityExportColumns,
       rows: visibleRows,
     });
@@ -200,20 +209,21 @@ export default function LiquiditySignalsPage() {
 
   function onExportExcel() {
     downloadExcelTable({
-      sheetName: "Liquidity",
-      fileName: exportStamp("liquidity", "xlsx"),
+      sheetName: pageTitle,
+      fileName: exportStamp(exportBase, "xlsx"),
       columns: liquidityExportColumns,
       rows: visibleRows,
     });
   }
 
   useEffect(() => {
-    setTitle("Liquidity");
-    setBreadcrumbs([{ label: "Home" }, { label: "Liquidity" }]);
+    setTitle(pageTitle);
+    setBreadcrumbs([{ label: "Home" }, { label: pageTitle }]);
+    setLoading(true);
     void refresh();
     return () => setPageActions(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [ruleset]);
 
   useEffect(() => {
     const exportDisabled = loading || visibleRows.length === 0;
@@ -266,12 +276,12 @@ export default function LiquiditySignalsPage() {
           startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
           onClick={() => void onRun()}
         >
-          {running ? "Running…" : "Run liquidity"}
+          {running ? "Running…" : `Run ${pageTitle.toLowerCase()}`}
         </Button>
       </MuiStack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, loading, sectorCheck, riskRewardCheck, visibleRows]);
+  }, [running, loading, sectorCheck, riskRewardCheck, visibleRows, pageTitle]);
 
   const columns = useMemo(() => {
     type Scored = LiquiditySignal & { score: number };
@@ -395,8 +405,10 @@ export default function LiquiditySignalsPage() {
         searchPlaceholder="Search symbol or name…"
         emptyMessage={
           sectorCheck || riskRewardCheck
-            ? "No liquidity signals match the active filters. Turn filters off, or Run liquidity again."
-            : "No liquidity signals. Click Run liquidity (needs 1H bars + 4H sweep + 1H confirm)."
+            ? `No ${pageTitle.toLowerCase()} signals match the active filters. Turn filters off, or Run again.`
+            : ruleset === "fresh"
+              ? "No liquidity fresh signals. Click Run (stricter confirm window + skip spent T1)."
+              : "No liquidity signals. Click Run liquidity (needs 1H bars + 4H sweep + 1H confirm)."
         }
       />
     </>
