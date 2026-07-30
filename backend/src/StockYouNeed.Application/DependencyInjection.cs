@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using StockYouNeed.Application.Outcomes;
 using StockYouNeed.Application.Services;
 
 namespace StockYouNeed.Application;
@@ -11,6 +12,7 @@ public static class DependencyInjection
         services.AddScoped<MarketBarsSyncService>();
         services.AddScoped<IntradayBarsSyncService>();
         services.AddScoped<LtpPollService>();
+        services.AddScoped<SignalOutcomeService>();
         services.AddScoped<AnalysisRunService>();
         services.AddScoped<LiquidityAnalysisService>();
         services.AddScoped<Application.Confluence.ConfluenceService>();

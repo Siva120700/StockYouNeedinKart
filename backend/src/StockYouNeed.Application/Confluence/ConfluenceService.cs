@@ -1,4 +1,5 @@
 using StockYouNeed.Application.Abstractions;
+using StockYouNeed.Application.Outcomes;
 using StockYouNeed.Domain;
 
 namespace StockYouNeed.Application.Confluence;
@@ -7,8 +8,13 @@ namespace StockYouNeed.Application.Confluence;
 public sealed class ConfluenceService
 {
     private readonly IPortfolioRepository _portfolio;
+    private readonly SignalOutcomeService _outcomes;
 
-    public ConfluenceService(IPortfolioRepository portfolio) => _portfolio = portfolio;
+    public ConfluenceService(IPortfolioRepository portfolio, SignalOutcomeService outcomes)
+    {
+        _portfolio = portfolio;
+        _outcomes = outcomes;
+    }
 
     public async Task<IReadOnlyList<ConfluenceSignalRow>> GetSignalsAsync(
         Guid userId, CancellationToken ct = default)
@@ -34,7 +40,7 @@ public sealed class ConfluenceService
                 out var entry, out var sl))
                 continue;
 
-            rows.Add(new ConfluenceSignalRow
+            var row = new ConfluenceSignalRow
             {
                 Id = Guid.NewGuid(),
                 UserId = userId,
@@ -56,7 +62,9 @@ public sealed class ConfluenceService
                 LiquidityStopLoss = liq.InitialStopLoss,
                 SectorConfirmed = sig.SectorConfirmed && liq.SectorConfirmed,
                 FreshCross = sig.FreshCross,
-            });
+            };
+            rows.Add(row);
+            await _outcomes.OpenFromConfluenceAsync(row, ct);
         }
 
         return rows.OrderByDescending(r => r.AsOfDate).ThenBy(r => r.AppSymbol).ToList();

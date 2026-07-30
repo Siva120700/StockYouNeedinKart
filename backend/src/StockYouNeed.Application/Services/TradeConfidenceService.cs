@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using StockYouNeed.Application.Abstractions;
+using StockYouNeed.Application.Outcomes;
 using StockYouNeed.Application.TradeScore;
 using StockYouNeed.Domain;
 
@@ -17,6 +18,7 @@ public sealed class TradeConfidenceService
     private readonly IMarketDataRepository _market;
     private readonly AnalysisRunService _analysis;
     private readonly LiquidityAnalysisService _liquidity;
+    private readonly SignalOutcomeService _outcomes;
     private readonly ILogger<TradeConfidenceService> _logger;
 
     public TradeConfidenceService(
@@ -25,6 +27,7 @@ public sealed class TradeConfidenceService
         IMarketDataRepository market,
         AnalysisRunService analysis,
         LiquidityAnalysisService liquidity,
+        SignalOutcomeService outcomes,
         ILogger<TradeConfidenceService> logger)
     {
         _portfolio = portfolio;
@@ -32,6 +35,7 @@ public sealed class TradeConfidenceService
         _market = market;
         _analysis = analysis;
         _liquidity = liquidity;
+        _outcomes = outcomes;
         _logger = logger;
     }
 
@@ -115,7 +119,7 @@ public sealed class TradeConfidenceService
                 var t2 = liq?.TargetT2 ?? sig.TargetT2;
                 var t3 = liq?.TargetT3 ?? sig.TargetT3;
 
-                await _tradeScore.InsertScoreAsync(new TradeConfidenceScoreRow
+                var score = new TradeConfidenceScoreRow
                 {
                     Id = Guid.NewGuid(),
                     RunId = runId,
@@ -143,7 +147,9 @@ public sealed class TradeConfidenceService
                     BreakoutConfirmed = breakoutConfirmed,
                     BreakoutAdx = breakout?.PatternDepthPct,
                     BreakoutRsi = null,
-                }, ct);
+                };
+                await _tradeScore.InsertScoreAsync(score, ct);
+                await _outcomes.OpenFromTradeScoreAsync(score, ct);
 
                 scored++;
             }

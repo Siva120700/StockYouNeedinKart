@@ -63,6 +63,18 @@ public sealed class DailySyncHostedService : BackgroundService
         await seed.SeedAsync(ct);
         await tokens.SyncUniverseTokensAsync(ct);
         await bars.SyncLastNTradingDaysAsync(ct);
+
+        try
+        {
+            var outcomes = scope.ServiceProvider.GetRequiredService<StockYouNeed.Application.Outcomes.SignalOutcomeService>();
+            var resolved = await outcomes.ResolveOpenAsync(auth.DemoUserId, ct);
+            _logger.LogInformation("Forward outcome resolve finished: {Resolved} closed", resolved);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Forward outcome resolve failed");
+        }
+
         _lastRunDateIst = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
         _logger.LogInformation("Daily sync finished.");
     }

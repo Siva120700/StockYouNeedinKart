@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StockYouNeed.Application.Abstractions;
 using StockYouNeed.Application.Options;
+using StockYouNeed.Application.Outcomes;
 using StockYouNeed.Domain;
 
 namespace StockYouNeed.Application.Services;
@@ -31,6 +32,7 @@ public sealed class LiquidityAnalysisService
     private readonly MarketBarsSyncService _barsSync;
     private readonly TokenSyncService _tokenSync;
     private readonly UniverseSeedService _universeSeed;
+    private readonly SignalOutcomeService _outcomes;
     private readonly AngelOptions _options;
     private readonly ILogger<LiquidityAnalysisService> _logger;
 
@@ -43,6 +45,7 @@ public sealed class LiquidityAnalysisService
         MarketBarsSyncService barsSync,
         TokenSyncService tokenSync,
         UniverseSeedService universeSeed,
+        SignalOutcomeService outcomes,
         IOptions<AngelOptions> options,
         ILogger<LiquidityAnalysisService> logger)
     {
@@ -54,6 +57,7 @@ public sealed class LiquidityAnalysisService
         _barsSync = barsSync;
         _tokenSync = tokenSync;
         _universeSeed = universeSeed;
+        _outcomes = outcomes;
         _options = options.Value;
         _logger = logger;
     }
@@ -186,6 +190,7 @@ public sealed class LiquidityAnalysisService
                     sectorConfirmedCount++;
 
                 await _portfolio.InsertLiquiditySignalAsync(signal, ct);
+                await _outcomes.OpenFromLiquidityAsync(signal, ruleset, ct);
                 signals++;
             }
 

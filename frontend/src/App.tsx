@@ -8,6 +8,7 @@ import LiquiditySignalsPage from "./pages/LiquiditySignalsPage";
 import TradeScorePage from "./modules/trade-score/TradeScorePage";
 import ConfluencePage from "./modules/confluence/ConfluencePage";
 import BreakoutPage from "./modules/breakout/BreakoutPage";
+import OutcomesPage from "./modules/outcomes/OutcomesPage";
 import BacktestPage from "./pages/BacktestPage";
 import PositionsPage from "./pages/PositionsPage";
 
@@ -40,6 +41,7 @@ export default function App() {
               <Route path="/confluence" element={<ConfluencePage />} />
               <Route path="/breakout" element={<BreakoutPage />} />
               <Route path="/trade-score" element={<TradeScorePage />} />
+              <Route path="/accuracy" element={<OutcomesPage />} />
               <Route path="/backtest" element={<BacktestPage />} />
               <Route path="/positions" element={<PositionsPage />} />
             </Routes>

@@ -28,6 +28,7 @@ const navItems = [
   { to: "/confluence", label: "Confluence", icon: ChartLine },
   { to: "/breakout", label: "Breakout", icon: ChartLine },
   { to: "/trade-score", label: "Trade Score", icon: ChartLine },
+  { to: "/accuracy", label: "Accuracy", icon: Notebook },
   { to: "/backtest", label: "Backtest", icon: Notebook },
   { to: "/positions", label: "Positions", icon: ListChecks },
 ];

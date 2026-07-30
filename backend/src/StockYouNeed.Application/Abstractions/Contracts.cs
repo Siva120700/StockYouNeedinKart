@@ -178,6 +178,17 @@ public interface IBreakoutRepository
         Guid userId, Guid? runId, CancellationToken ct = default);
 }
 
+public interface ISignalOutcomeRepository
+{
+    Task OpenAsync(SignalOutcomeRow row, CancellationToken ct = default);
+    Task<IReadOnlyList<SignalOutcomeRow>> GetOpenAsync(Guid userId, CancellationToken ct = default);
+    Task<IReadOnlyList<SignalOutcomeRow>> GetOutcomesAsync(
+        Guid userId, string? strategy, string? result, CancellationToken ct = default);
+    Task ResolveAsync(SignalOutcomeRow row, CancellationToken ct = default);
+    Task<IReadOnlyList<SignalOutcomeSummary>> GetSummariesAsync(
+        Guid userId, string? strategy, CancellationToken ct = default);
+}
+
 public interface ICurrentUserAccessor
 {
     Guid UserId { get; }

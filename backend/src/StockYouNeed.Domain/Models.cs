@@ -325,3 +325,49 @@ public sealed class BacktestSymbolSummary
     /// <summary>Average realized R-multiple from trade outcomes.</summary>
     public decimal? AvgRMultiple { get; set; }
 }
+
+/// <summary>Live forward outcome for a setup emitted by a strategy engine.</summary>
+public sealed class SignalOutcomeRow
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string InstrumentName { get; set; } = "";
+    public string Strategy { get; set; } = "signals";
+    public string Side { get; set; } = "buy";
+    public DateOnly SignalDate { get; set; }
+    public decimal EntryPrice { get; set; }
+    public decimal InitialStopLoss { get; set; }
+    public decimal? TargetT1 { get; set; }
+    public decimal? TargetT2 { get; set; }
+    public decimal? TargetT3 { get; set; }
+    public string Result { get; set; } = "open";
+    public string? TargetLevel { get; set; }
+    public decimal? TargetHitPct { get; set; }
+    public decimal? ExitPrice { get; set; }
+    public DateOnly? ExitDate { get; set; }
+    public decimal? PnlPct { get; set; }
+    public decimal? RMultiple { get; set; }
+    public Guid? AnalysisSignalId { get; set; }
+    public Guid? LiquiditySignalId { get; set; }
+    public Guid? TradeConfidenceScoreId { get; set; }
+    public Guid? BreakoutConfirmationId { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>Aggregated live forward accuracy for one strategy (or all).</summary>
+public sealed class SignalOutcomeSummary
+{
+    public string? StrategyFilter { get; set; }
+    public int Setups { get; set; }
+    public int TargetHits { get; set; }
+    public int SlHits { get; set; }
+    public int TimeStops { get; set; }
+    public int OpenCount { get; set; }
+    public decimal? TargetHitRatePct { get; set; }
+    public decimal? AvgTargetHitPct { get; set; }
+    public decimal? AvgRiskReward { get; set; }
+    public decimal? AvgRMultiple { get; set; }
+}

@@ -38,6 +38,7 @@ public sealed class DatabaseMigrator
             Path.Combine(databaseRoot, "013_trade_confidence.sql"),
             Path.Combine(databaseRoot, "014_breakout_analysis.sql"),
             Path.Combine(databaseRoot, "015_breakout_pattern_type.sql"),
+            Path.Combine(databaseRoot, "016_signal_outcomes.sql"),
         };
 
         await using var conn = new NpgsqlConnection(_db.ConnectionString);

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using StockYouNeed.Application.Abstractions;
+using StockYouNeed.Application.Outcomes;
 using StockYouNeed.Application.Services;
 using StockYouNeed.Application.TradeScore;
 using StockYouNeed.Domain;
@@ -18,6 +19,7 @@ public sealed class BreakoutAnalysisService
     private readonly IMarketDataRepository _market;
     private readonly IInstrumentRepository _instruments;
     private readonly MarketBarsSyncService _barsSync;
+    private readonly SignalOutcomeService _outcomes;
     private readonly ILogger<BreakoutAnalysisService> _logger;
 
     public BreakoutAnalysisService(
@@ -25,12 +27,14 @@ public sealed class BreakoutAnalysisService
         IMarketDataRepository market,
         IInstrumentRepository instruments,
         MarketBarsSyncService barsSync,
+        SignalOutcomeService outcomes,
         ILogger<BreakoutAnalysisService> logger)
     {
         _breakout = breakout;
         _market = market;
         _instruments = instruments;
         _barsSync = barsSync;
+        _outcomes = outcomes;
         _logger = logger;
     }
 
@@ -80,7 +84,7 @@ public sealed class BreakoutAnalysisService
                     continue;
 
                 scanned++;
-                await _breakout.InsertConfirmationAsync(new BreakoutConfirmationRow
+                var confirmation = new BreakoutConfirmationRow
                 {
                     Id = Guid.NewGuid(),
                     RunId = runId,
@@ -95,10 +99,13 @@ public sealed class BreakoutAnalysisService
                     Level20d = result.BreakoutLevel,
                     VolumeRatio = result.VolumeRatio,
                     PatternType = result.PatternType,
-                }, ct);
-
+                };
+                await _breakout.InsertConfirmationAsync(confirmation, ct);
                 if (result.Confirmed)
+                {
+                    await _outcomes.OpenFromBreakoutAsync(confirmation, ct);
                     confirmed++;
+                }
             }
 
             await _breakout.CompleteRunAsync(runId, userId, "succeeded", null, ct);

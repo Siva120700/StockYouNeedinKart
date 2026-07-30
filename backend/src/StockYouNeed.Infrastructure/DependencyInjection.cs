@@ -33,6 +33,7 @@ public static class DependencyInjection
         services.AddScoped<IBacktestRepository, BacktestRepository>();
         services.AddScoped<ITradeScoreRepository, TradeScoreRepository>();
         services.AddScoped<IBreakoutRepository, BreakoutRepository>();
+        services.AddScoped<ISignalOutcomeRepository, SignalOutcomeRepository>();
         services.AddSingleton<DatabaseMigrator>();
 
         return services;

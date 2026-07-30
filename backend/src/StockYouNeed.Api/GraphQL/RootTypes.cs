@@ -136,11 +136,52 @@ public sealed class Query
         }
     }
 
+    public async Task<IReadOnlyList<SignalOutcomeRow>> SignalOutcomes(
+        string? strategy,
+        string? result,
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.Outcomes.SignalOutcomeService outcomes,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await outcomes.GetOutcomesAsync(
+                user.UserId, NormalizeStrategy(strategy), NormalizeOutcomeResult(result), ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
+    public async Task<IReadOnlyList<SignalOutcomeSummary>> SignalOutcomeSummaries(
+        string? strategy,
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.Outcomes.SignalOutcomeService outcomes,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await outcomes.GetSummariesAsync(user.UserId, NormalizeStrategy(strategy), ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
     private static string? NormalizeStrategy(string? strategy)
     {
         if (string.IsNullOrWhiteSpace(strategy)) return null;
         var s = strategy.Trim().ToLowerInvariant();
         return s is "signals" or "liquidity" or "liquidity_fresh" or "confluence" or "trade_score" or "breakout" ? s : null;
+    }
+
+    private static string? NormalizeOutcomeResult(string? result)
+    {
+        if (string.IsNullOrWhiteSpace(result)) return null;
+        var s = result.Trim().ToLowerInvariant();
+        return s is "target" or "sl" or "open" or "time_stop" ? s : null;
     }
 }
 
@@ -360,6 +401,36 @@ public sealed class Mutation
                     .SetCode("BACKTEST_FAILED")
                     .SetExtension("strategy", strategy)
                     .Build());
+        }
+    }
+
+    public async Task<int> ResolveSignalOutcomes(
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.Outcomes.SignalOutcomeService outcomes,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await outcomes.ResolveOpenAsync(user.UserId, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
+    public async Task<int> BackfillSignalOutcomes(
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.Outcomes.SignalOutcomeService outcomes,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await outcomes.BackfillFromLiveAsync(user.UserId, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
         }
     }
 }

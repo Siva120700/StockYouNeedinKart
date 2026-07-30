@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StockYouNeed.Application.Abstractions;
 using StockYouNeed.Application.Options;
+using StockYouNeed.Application.Outcomes;
 using StockYouNeed.Domain;
 
 namespace StockYouNeed.Application.Services;
@@ -16,6 +17,7 @@ public sealed class AnalysisRunService
     private readonly MarketBarsSyncService _barsSync;
     private readonly TokenSyncService _tokenSync;
     private readonly UniverseSeedService _universeSeed;
+    private readonly SignalOutcomeService _outcomes;
     private readonly AngelOptions _options;
     private readonly ILogger<AnalysisRunService> _logger;
 
@@ -27,6 +29,7 @@ public sealed class AnalysisRunService
         MarketBarsSyncService barsSync,
         TokenSyncService tokenSync,
         UniverseSeedService universeSeed,
+        SignalOutcomeService outcomes,
         IOptions<AngelOptions> options,
         ILogger<AnalysisRunService> logger)
     {
@@ -37,6 +40,7 @@ public sealed class AnalysisRunService
         _barsSync = barsSync;
         _tokenSync = tokenSync;
         _universeSeed = universeSeed;
+        _outcomes = outcomes;
         _options = options.Value;
         _logger = logger;
     }
@@ -257,6 +261,7 @@ public sealed class AnalysisRunService
                     sectorConfirmedCount++;
 
                 await _portfolio.InsertSignalAsync(signal, ct);
+                await _outcomes.OpenFromSignalAsync(signal, ct);
                 signalCount++;
             }
 
