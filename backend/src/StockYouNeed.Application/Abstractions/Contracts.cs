@@ -126,6 +126,8 @@ public interface IPortfolioRepository
         Guid userId, Guid? runId, string ruleset = "classic", CancellationToken ct = default);
     Task<LiquiditySignalRow?> GetLiquiditySignalAsync(Guid signalId, Guid userId, CancellationToken ct = default);
     Task<Guid> OpenPositionFromLiquiditySignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default);
+    Task<Guid> OpenPositionFromTradeScoreAsync(
+        Guid userId, Guid scoreId, int quantityLots, ITradeScoreRepository tradeScore, CancellationToken ct = default);
     Task<Guid> OpenPositionFromConfluenceAsync(
         Guid userId, Guid liquiditySignalId, Guid analysisSignalId, int quantityLots, CancellationToken ct = default);
     Task<Guid> OpenPositionFromSignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default);
@@ -153,6 +155,27 @@ public interface IBacktestRepository
     Task DeleteAutoNotesAsync(Guid userId, Guid instrumentId, string strategy, CancellationToken ct = default);
 
     Task InsertAutoNotesAsync(IReadOnlyList<BacktestNoteRow> notes, CancellationToken ct = default);
+}
+
+public interface ITradeScoreRepository
+{
+    Task<Guid> CreateRunAsync(Guid userId, string triggeredBy, DateOnly asOfDate, CancellationToken ct = default);
+    Task CompleteRunAsync(Guid runId, Guid userId, string status, string? errorMessage, CancellationToken ct = default);
+    Task InsertBreakoutAsync(Guid runId, Guid userId, Guid instrumentId, string side, DateOnly asOfDate,
+        bool confirmed, decimal close, decimal level20d, decimal volRatio,
+        decimal? adx, decimal? rsi, decimal? atr, bool atrExpansion, CancellationToken ct = default);
+    Task InsertScoreAsync(TradeConfidenceScoreRow row, CancellationToken ct = default);
+    Task<IReadOnlyList<TradeConfidenceScoreRow>> GetScoresAsync(Guid userId, Guid? runId, CancellationToken ct = default);
+    Task<TradeConfidenceScoreRow?> GetScoreAsync(Guid scoreId, Guid userId, CancellationToken ct = default);
+}
+
+public interface IBreakoutRepository
+{
+    Task<Guid> CreateRunAsync(Guid userId, string triggeredBy, DateOnly asOfDate, CancellationToken ct = default);
+    Task CompleteRunAsync(Guid runId, Guid userId, string status, string? errorMessage, CancellationToken ct = default);
+    Task InsertConfirmationAsync(BreakoutConfirmationRow row, CancellationToken ct = default);
+    Task<IReadOnlyList<BreakoutConfirmationRow>> GetConfirmationsAsync(
+        Guid userId, Guid? runId, CancellationToken ct = default);
 }
 
 public interface ICurrentUserAccessor

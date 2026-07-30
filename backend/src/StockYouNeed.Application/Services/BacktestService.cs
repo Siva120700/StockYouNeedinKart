@@ -2,6 +2,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StockYouNeed.Application.Abstractions;
 using StockYouNeed.Application.Options;
+using StockYouNeed.Application.Confluence;
+using StockYouNeed.Application.TradeScore;
 using StockYouNeed.Domain;
 
 namespace StockYouNeed.Application.Services;
@@ -42,8 +44,9 @@ public sealed class BacktestService
         CancellationToken ct = default)
     {
         strategy = strategy.Trim().ToLowerInvariant();
-        if (strategy is not ("signals" or "liquidity" or "liquidity_fresh" or "confluence"))
-            throw new ArgumentException("Strategy must be 'signals', 'liquidity', 'liquidity_fresh', or 'confluence'.");
+        if (strategy is not ("signals" or "liquidity" or "liquidity_fresh" or "confluence" or "trade_score" or "breakout"))
+            throw new ArgumentException(
+                "Strategy must be 'signals', 'liquidity', 'liquidity_fresh', 'confluence', 'trade_score', or 'breakout'.");
 
         if (!_options.Enabled)
             throw new InvalidOperationException("Angel is disabled; cannot fetch historical candles.");
@@ -60,6 +63,10 @@ public sealed class BacktestService
             notes = await ReplaySignalsAsync(userId, token, fromIst, toIst, ct);
         else if (strategy == "confluence")
             notes = await ReplayConfluenceAsync(userId, token, fromIst, toIst, ct);
+        else if (strategy == "trade_score")
+            notes = await ReplayTradeScoreAsync(userId, token, fromIst, toIst, ct);
+        else if (strategy == "breakout")
+            notes = await ReplayBreakoutAsync(userId, token, fromIst, toIst, ct);
         else
             notes = await ReplayLiquidityAsync(userId, token, fromIst, toIst, ct, strategy);
 
@@ -266,6 +273,152 @@ public sealed class BacktestService
                 AppSymbol = token.AppSymbol,
                 Interval = IntradayBarsSyncService.Interval1h,
                 BarTime = c.BarTime!.Value,
+                Open = c.Open, High = c.High, Low = c.Low, Close = c.Close, Volume = c.Volume
+            }).ToList();
+
+        var dailyChron = dailyCandles
+            .GroupBy(c => c.TradeDate).Select(g => g.First()).OrderBy(c => c.TradeDate)
+            .Select(c => new MarketBarRow
+            {
+                InstrumentId = token.InstrumentId, AppSymbol = token.AppSymbol,
+                TradeDate = c.TradeDate, Open = c.Open, High = c.High, Low = c.Low,
+                Close = c.Close, Volume = c.Volume
+            }).ToList();
+
+        if (bars1hChron.Count < 60 || dailyChron.Count < 10)
+            throw new InvalidOperationException(
+                $"Not enough history for confluence (1H={bars1hChron.Count}, daily={dailyChron.Count}).");
+
+        var dailySignals = new List<(DateOnly Date, AnalysisSignalRow Signal)>();
+        var runId = Guid.Empty;
+        for (var i = 8; i < dailyChron.Count; i++)
+        {
+            var window = dailyChron.Take(i + 1).Reverse().ToList();
+            var sig = BreakoutSignalEvaluator.Evaluate(userId, runId, dailyChron[i].TradeDate, window, null);
+            if (sig is not null) dailySignals.Add((dailyChron[i].TradeDate, sig));
+        }
+
+        var notes = new List<BacktestNoteRow>();
+        for (var i = 50; i < bars1hChron.Count; i += 2)
+        {
+            ct.ThrowIfCancellationRequested();
+            var asOfBar = bars1hChron[i];
+            var bars1hNewest = bars1hChron.Take(i + 1).Reverse().ToList();
+            var bars4h = LiquidityAnalysisService.Aggregate4h(bars1hNewest);
+            if (bars4h.Count < 8) continue;
+
+            var asOfDate = DateOnly.FromDateTime(asOfBar.BarTime.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
+            var dailyNewest = dailyChron.Where(d => d.TradeDate <= asOfDate)
+                .OrderByDescending(d => d.TradeDate).Take(15).ToList();
+
+            var liq = LiquidityAnalysisService.TryEvaluate(
+                userId, runId, asOfDate, token, bars1hNewest, bars4h, dailyNewest, null, "fresh");
+            if (liq is null) continue;
+
+            var sigMatch = dailySignals
+                .Where(ds => string.Equals(ds.Signal.Side, liq.Side, StringComparison.OrdinalIgnoreCase)
+                    && ConfluenceLevelComposer.DatesAlign(asOfDate, ds.Date)
+                    && ConfluenceLevelComposer.PricesAlign(liq.EntryPrice, ds.Signal.EntryPrice, liq.EntryPrice))
+                .Select(ds => ds.Signal).FirstOrDefault();
+            if (sigMatch is null) continue;
+
+            if (!ConfluenceLevelComposer.TryCompose(
+                liq.Side, sigMatch.EntryPrice, sigMatch.InitialStopLoss,
+                liq.EntryPrice, liq.InitialStopLoss, out var entry, out var sl))
+                continue;
+
+            if (!MeetsMinRiskReward(entry, sl, liq.TargetT1)) continue;
+            if (rulesetFreshSkip(liq, asOfBar)) continue;
+            if (dedupeRecent(notes, liq.Side, asOfBar)) continue;
+
+            var forward = forwardHourly(bars1hChron, i);
+            var outcome = SimulateOutcome(liq.Side, entry, sl, liq.TargetT1, liq.TargetT2, liq.TargetT3, forward);
+            notes.Add(ToNote(userId, token, "confluence", liq.Side, asOfDate, entry, sl,
+                liq.TargetT1, liq.TargetT2, liq.TargetT3, outcome));
+        }
+        return notes;
+    }
+
+    private async Task<List<BacktestNoteRow>> ReplayBreakoutAsync(
+        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct)
+    {
+        var dailyCandles = await FetchDailyChunkedAsync(token, fromIst, toIst, ct);
+        var dailyChron = dailyCandles
+            .GroupBy(c => c.TradeDate).Select(g => g.First()).OrderBy(c => c.TradeDate)
+            .Select(c => new MarketBarRow
+            {
+                InstrumentId = token.InstrumentId, AppSymbol = token.AppSymbol,
+                TradeDate = c.TradeDate, Open = c.Open, High = c.High, Low = c.Low,
+                Close = c.Close, Volume = c.Volume
+            }).ToList();
+
+        if (dailyChron.Count < 30)
+            throw new InvalidOperationException($"Not enough daily history ({dailyChron.Count} bars).");
+
+        var notes = new List<BacktestNoteRow>();
+        for (var i = 25; i < dailyChron.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var window = dailyChron.Take(i + 1).Reverse().ToList();
+            var result = BreakoutConfirmationEvaluator.Evaluate(window);
+            if (result is not { Confirmed: true }) continue;
+
+            var asOf = dailyChron[i].TradeDate;
+            var entry = result.Close;
+            var level = result.BreakoutLevel;
+            var sl = result.Side == SignalSides.Buy
+                ? (level < entry ? level : entry * 0.98m)
+                : (level > entry ? level : entry * 1.02m);
+
+            var risk = Math.Abs(entry - sl);
+            var t1 = result.Side == SignalSides.Buy ? entry + risk * 2m : entry - risk * 2m;
+            var t2 = result.Side == SignalSides.Buy ? entry + risk * 3m : entry - risk * 3m;
+            var t3 = result.Side == SignalSides.Buy ? entry + risk * 4m : entry - risk * 4m;
+
+            if (!MeetsMinRiskReward(entry, sl, t1)) continue;
+
+            var forward = dailyChron.Skip(i + 1).Take(DailyTimeStopBars)
+                .Select(b => (b.High, b.Low, b.Close, (DateOnly?)b.TradeDate, (DateTimeOffset?)null)).ToList();
+            var outcome = SimulateOutcome(result.Side, entry, sl, t1, t2, t3, forward);
+            notes.Add(ToNote(userId, token, "breakout", result.Side, asOf, entry, sl, t1, t2, t3, outcome));
+        }
+        return notes;
+    }
+
+    private static bool rulesetFreshSkip(LiquiditySignalRow liq, MarketIntradayBarRow asOfBar) =>
+        SignalBarAlreadyHitTarget(liq.Side, liq.TargetT1, asOfBar);
+
+    private static bool dedupeRecent(List<BacktestNoteRow> notes, string side, MarketIntradayBarRow asOfBar)
+    {
+        if (notes.Count == 0) return false;
+        var last = notes[^1];
+        var curTime = asOfBar.BarTime.DateTime;
+        var lastTime = last.SignalDate.ToDateTime(TimeOnly.MinValue);
+        return last.Side == side && (curTime - lastTime).TotalHours < 6;
+    }
+
+    private static List<(decimal High, decimal Low, decimal Close, DateOnly? Date, DateTimeOffset? Time)> forwardHourly(
+        List<MarketIntradayBarRow> bars, int i) =>
+        bars.Skip(i + 1).Take(HourlyTimeStopBars)
+            .Select(b => (b.High, b.Low, b.Close,
+                (DateOnly?)DateOnly.FromDateTime(b.BarTime.ToOffset(TimeSpan.FromHours(5.5)).DateTime),
+                (DateTimeOffset?)b.BarTime)).ToList();
+
+    private async Task<List<BacktestNoteRow>> ReplayTradeScoreAsync(
+        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct)
+    {
+        var hourly = await FetchHourlyChunkedAsync(token, fromIst, toIst, ct);
+        var dailyCandles = await FetchDailyChunkedAsync(token, fromIst, toIst, ct);
+
+        var bars1hChron = hourly
+            .Where(c => c.BarTime is not null)
+            .OrderBy(c => c.BarTime)
+            .Select(c => new MarketIntradayBarRow
+            {
+                InstrumentId = token.InstrumentId,
+                AppSymbol = token.AppSymbol,
+                Interval = IntradayBarsSyncService.Interval1h,
+                BarTime = c.BarTime!.Value,
                 Open = c.Open,
                 High = c.High,
                 Low = c.Low,
@@ -293,7 +446,7 @@ public sealed class BacktestService
 
         if (bars1hChron.Count < 60 || dailyChron.Count < 10)
             throw new InvalidOperationException(
-                $"Not enough history for confluence (1H={bars1hChron.Count}, daily={dailyChron.Count}). Retry after rate limit clears.");
+                $"Not enough history for trade score (1H={bars1hChron.Count}, daily={dailyChron.Count}). Retry after rate limit clears.");
 
         var dailySignals = new List<(DateOnly Date, AnalysisSignalRow Signal)>();
         var runId = Guid.Empty;
@@ -331,20 +484,28 @@ public sealed class BacktestService
             if (liq is null)
                 continue;
 
-            var breakout = dailySignals
+            var sigMatch = dailySignals
                 .Where(ds =>
                     string.Equals(ds.Signal.Side, liq.Side, StringComparison.OrdinalIgnoreCase)
-                    && ConfluenceSignalHelper.DatesAlign(asOfDate, ds.Date)
-                    && ConfluenceSignalHelper.PricesAlign(liq.EntryPrice, ds.Signal.EntryPrice, liq.EntryPrice))
+                    && TradeScoreLevelComposer.DatesAlign(asOfDate, ds.Date)
+                    && TradeScoreLevelComposer.PricesAlign(liq.EntryPrice, ds.Signal.EntryPrice, liq.EntryPrice))
                 .Select(ds => ds.Signal)
                 .FirstOrDefault();
 
-            if (breakout is null)
+            if (sigMatch is null)
                 continue;
 
-            if (!ConfluenceSignalHelper.TryCombineLevels(
-                liq.Side, liq.EntryPrice, liq.InitialStopLoss,
-                breakout.EntryPrice, breakout.InitialStopLoss,
+            var dailyWindow = dailyChron.Where(d => d.TradeDate <= asOfDate).OrderByDescending(d => d.TradeDate).ToList();
+            var breakoutConfirm = dailyWindow.Count >= 21
+                ? BreakoutConfirmationEvaluator.Evaluate(dailyWindow)
+                : null;
+            if (breakoutConfirm is not { Confirmed: true }
+                || !string.Equals(breakoutConfirm.Side, liq.Side, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (!TradeScoreLevelComposer.TryCompose(
+                liq.Side, sigMatch.EntryPrice, sigMatch.InitialStopLoss,
+                liq.EntryPrice, liq.InitialStopLoss,
                 out var entry, out var sl))
                 continue;
 
@@ -373,7 +534,7 @@ public sealed class BacktestService
                 liq.Side, entry, sl,
                 liq.TargetT1, liq.TargetT2, liq.TargetT3, forward);
 
-            notes.Add(ToNote(userId, token, "confluence", liq.Side, asOfDate,
+            notes.Add(ToNote(userId, token, "trade_score", liq.Side, asOfDate,
                 entry, sl, liq.TargetT1, liq.TargetT2, liq.TargetT3, outcome));
         }
 

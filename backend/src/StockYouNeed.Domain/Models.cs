@@ -145,7 +145,7 @@ public sealed class LiquiditySignalRow
     public string TimeframeContext { get; set; } = "4h_sweep+1h_confirm";
 }
 
-/// <summary>Signals + Liquidity Fresh overlap with combined entry/SL.</summary>
+/// <summary>Signals + Liquidity Fresh overlap (Confluence menu).</summary>
 public sealed class ConfluenceSignalRow
 {
     public Guid Id { get; set; }
@@ -168,11 +168,78 @@ public sealed class ConfluenceSignalRow
     public decimal LiquidityStopLoss { get; set; }
     public bool SectorConfirmed { get; set; }
     public bool FreshCross { get; set; }
-    public decimal RelativeVolume { get; set; }
-    public decimal RvolPercentile { get; set; }
-    public bool StrongClose { get; set; }
-    public string? SweptZoneType { get; set; }
-    public string TimeframeContext { get; set; } = "signals+liquidity_fresh";
+}
+
+/// <summary>Standalone breakout confirmation row (Breakout menu).</summary>
+public sealed class BreakoutConfirmationRow
+{
+    public Guid Id { get; set; }
+    public Guid RunId { get; set; }
+    public Guid UserId { get; set; }
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string InstrumentName { get; set; } = "";
+    public string Side { get; set; } = "";
+    public DateOnly AsOfDate { get; set; }
+    public bool Confirmed { get; set; }
+    public decimal? ClosePrice { get; set; }
+    public decimal? Level20d { get; set; }
+    public decimal? VolumeRatio { get; set; }
+    public decimal? Adx { get; set; }
+    public decimal? Rsi { get; set; }
+    public decimal? Atr { get; set; }
+    public bool AtrExpansion { get; set; }
+    public string? PatternType { get; set; }
+}
+
+public sealed class BreakoutAnalysisRunRow
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public DateOnly AsOfDate { get; set; }
+    public string Status { get; set; } = "running";
+}
+
+/// <summary>Trade confidence run metadata.</summary>
+public sealed class TradeConfidenceRunRow
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public string TriggeredBy { get; set; } = "manual";
+    public DateOnly AsOfDate { get; set; }
+    public string Status { get; set; } = "running";
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>Scored high-probability trade (Signals + Liquidity + Breakout + F&amp;O layers).</summary>
+public sealed class TradeConfidenceScoreRow
+{
+    public Guid Id { get; set; }
+    public Guid RunId { get; set; }
+    public Guid UserId { get; set; }
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string InstrumentName { get; set; } = "";
+    public string Side { get; set; } = "";
+    public DateOnly AsOfDate { get; set; }
+    public int ConfidenceScore { get; set; }
+    public string Rating { get; set; } = "avoid";
+    public int SignalsScore { get; set; }
+    public int LiquidityScore { get; set; }
+    public int BreakoutScore { get; set; }
+    public int FuturesScore { get; set; }
+    public int OptionsScore { get; set; }
+    public string[] Reasons { get; set; } = Array.Empty<string>();
+    public decimal EntryPrice { get; set; }
+    public decimal InitialStopLoss { get; set; }
+    public decimal? TargetT1 { get; set; }
+    public decimal? TargetT2 { get; set; }
+    public decimal? TargetT3 { get; set; }
+    public Guid? AnalysisSignalId { get; set; }
+    public Guid? LiquiditySignalId { get; set; }
+    public bool BreakoutConfirmed { get; set; }
+    public decimal? BreakoutAdx { get; set; }
+    public decimal? BreakoutRsi { get; set; }
 }
 
 public sealed class OpenPositionRow

@@ -1,0 +1,21 @@
+export type ConfluenceSignal = {
+  id: string;
+  instrumentId: string;
+  appSymbol: string;
+  instrumentName: string;
+  side: string;
+  asOfDate: string;
+  entryPrice: number;
+  initialStopLoss: number;
+  targetT1?: number | null;
+  targetT2?: number | null;
+  targetT3?: number | null;
+  analysisSignalId: string;
+  liquiditySignalId: string;
+  signalsEntry: number;
+  liquidityEntry: number;
+  signalsStopLoss: number;
+  liquidityStopLoss: number;
+  sectorConfirmed: boolean;
+  freshCross: boolean;
+};

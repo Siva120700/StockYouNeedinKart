@@ -26,6 +26,8 @@ const navItems = [
   { to: "/liquidity", label: "Liquidity", icon: Drop },
   { to: "/liquidity-fresh", label: "Liquidity Fresh", icon: Drop },
   { to: "/confluence", label: "Confluence", icon: ChartLine },
+  { to: "/breakout", label: "Breakout", icon: ChartLine },
+  { to: "/trade-score", label: "Trade Score", icon: ChartLine },
   { to: "/backtest", label: "Backtest", icon: Notebook },
   { to: "/positions", label: "Positions", icon: ListChecks },
 ];

@@ -32,6 +32,10 @@ public sealed class MarketBarsSyncService
     }
 
     public async Task<int> SyncLastNTradingDaysAsync(CancellationToken ct = default)
+        => await SyncLastNTradingDaysAsync(lookbackOverride: null, ct);
+
+    /// <summary>Fetch/upsert last N daily bars (override lookback for pattern breakouts).</summary>
+    public async Task<int> SyncLastNTradingDaysAsync(int? lookbackOverride, CancellationToken ct = default)
     {
         if (!_angelOptions.Enabled)
         {
@@ -51,7 +55,7 @@ public sealed class MarketBarsSyncService
             return 0;
         }
 
-        return await SyncTokensBarsAsync(tokens, ct);
+        return await SyncTokensBarsAsync(tokens, lookbackOverride, ct);
     }
 
     /// <summary>Fetch/upsert last N daily bars only for sector indexes that lack history.</summary>
@@ -83,12 +87,13 @@ public sealed class MarketBarsSyncService
 
         _logger.LogInformation("Syncing bars for {Count} sector indexes missing history…", missing.Count);
         await _angel.EnsureSessionAsync(ct);
-        return await SyncTokensBarsAsync(missing, ct);
+        return await SyncTokensBarsAsync(missing, lookbackOverride: null, ct);
     }
 
-    private async Task<int> SyncTokensBarsAsync(IReadOnlyList<AngelTokenRow> tokens, CancellationToken ct)
+    private async Task<int> SyncTokensBarsAsync(
+        IReadOnlyList<AngelTokenRow> tokens, int? lookbackOverride, CancellationToken ct)
     {
-        var lookback = Math.Max(10, _schedule.MarketBarsLookbackDays);
+        var lookback = Math.Max(10, lookbackOverride ?? _schedule.MarketBarsLookbackDays);
         // Calendar buffer to cover weekends/holidays for ~N trading days
         var toIst = DateTime.Now;
         var fromIst = toIst.Date.AddDays(-(lookback * 2 + 5));

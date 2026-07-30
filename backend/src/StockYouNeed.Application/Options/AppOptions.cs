@@ -30,7 +30,7 @@ public sealed class WorkerScheduleOptions
     /// <summary>IST hour (0-23) to run daily token + bars sync.</summary>
     public int DailySyncHourIst { get; set; } = 8;
     public int LtpPollIntervalSeconds { get; set; } = 5;
-    public int MarketBarsLookbackDays { get; set; } = 10;
+    public int MarketBarsLookbackDays { get; set; } = 60;
 }
 
 public sealed class DevAuthOptions

@@ -47,9 +47,23 @@ public sealed class Query
 
     public async Task<IReadOnlyList<ConfluenceSignalRow>> ConfluenceSignals(
         [Service] ICurrentUserAccessor user,
-        [Service] ConfluenceService confluence,
+        [Service] Application.Confluence.ConfluenceService confluence,
         CancellationToken ct)
         => await confluence.GetSignalsAsync(user.UserId, ct);
+
+    public async Task<IReadOnlyList<BreakoutConfirmationRow>> BreakoutConfirmations(
+        Guid? runId,
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.Breakout.BreakoutAnalysisService breakout,
+        CancellationToken ct)
+        => await breakout.GetConfirmationsAsync(user.UserId, runId, ct);
+
+    public async Task<IReadOnlyList<TradeConfidenceScoreRow>> TradeConfidenceScores(
+        Guid? runId,
+        [Service] ICurrentUserAccessor user,
+        [Service] TradeConfidenceService tradeScore,
+        CancellationToken ct)
+        => await tradeScore.GetScoresAsync(user.UserId, runId, ct);
 
     public async Task<IReadOnlyList<OpenPositionRow>> OpenPositions(
         [Service] ICurrentUserAccessor user,
@@ -126,7 +140,7 @@ public sealed class Query
     {
         if (string.IsNullOrWhiteSpace(strategy)) return null;
         var s = strategy.Trim().ToLowerInvariant();
-        return s is "signals" or "liquidity" or "liquidity_fresh" or "confluence" ? s : null;
+        return s is "signals" or "liquidity" or "liquidity_fresh" or "confluence" or "trade_score" or "breakout" ? s : null;
     }
 }
 
@@ -165,6 +179,38 @@ public sealed class Mutation
             "manual",
             ct,
             ruleset ?? "classic");
+
+    public async Task<TradeConfidenceRunRow> RunTradeConfidenceAnalysis(
+        bool refreshSignals,
+        bool refreshLiquidity,
+        [Service] ICurrentUserAccessor user,
+        [Service] TradeConfidenceService tradeScore,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await tradeScore.RunAsync(user.UserId, refreshSignals, refreshLiquidity, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
+    public async Task<BreakoutAnalysisRunRow> RunBreakoutAnalysis(
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.Breakout.BreakoutAnalysisService breakout,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await breakout.RunAsync(user.UserId, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
 
     public async Task<bool> AddToWatchlist(
         Guid instrumentId,
@@ -213,6 +259,16 @@ public sealed class Mutation
         CancellationToken ct)
         => await portfolio.OpenPositionFromConfluenceAsync(
             user.UserId, liquiditySignalId, analysisSignalId, quantityLots <= 0 ? 1 : quantityLots, ct);
+
+    public async Task<Guid> OpenPositionFromTradeScore(
+        Guid scoreId,
+        int quantityLots,
+        [Service] ICurrentUserAccessor user,
+        [Service] ITradeScoreRepository tradeScore,
+        [Service] IPortfolioRepository portfolio,
+        CancellationToken ct)
+        => await portfolio.OpenPositionFromTradeScoreAsync(
+            user.UserId, scoreId, quantityLots <= 0 ? 1 : quantityLots, tradeScore, ct);
 
     public async Task<bool> UpdateStopLoss(
         Guid positionId,

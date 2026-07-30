@@ -1,0 +1,110 @@
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, FormControlLabel, Stack, Switch } from "@mui/material";
+import { Play } from "@phosphor-icons/react";
+import { columnFactories } from "../../zen_components/table/columnFactories";
+import ZenTable from "../../zen_components/table/ZenTable";
+import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
+import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
+import { BreakoutApi } from "./api";
+import type { BreakoutConfirmation } from "./types";
+import { patternLabel } from "./types";
+
+export default function BreakoutPage() {
+  const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
+    useZenPrimaryLayoutContext();
+  const [rows, setRows] = useState<BreakoutConfirmation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [confirmedOnly, setConfirmedOnly] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    setError(null);
+    setIsSyncing(true);
+    try {
+      setRows(await BreakoutApi.fetchConfirmations(false));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+      setIsSyncing(false);
+    }
+  }
+
+  async function onRun() {
+    setRunning(true);
+    try {
+      await BreakoutApi.runAnalysis();
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const visible = useMemo(
+    () => (confirmedOnly ? rows.filter((r) => r.confirmed) : rows),
+    [rows, confirmedOnly],
+  );
+
+  useEffect(() => {
+    setTitle("Breakout");
+    setBreadcrumbs([{ label: "Home" }, { label: "Breakout" }]);
+    void refresh();
+    return () => setPageActions(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    setPageActions(
+      <Stack direction="row" spacing={1} alignItems="center">
+        <FormControlLabel
+          control={<Switch size="small" checked={confirmedOnly} onChange={(e) => setConfirmedOnly(e.target.checked)} />}
+          label="Confirmed only"
+        />
+        <Button variant="contained" size="small" disabled={running} startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
+          onClick={() => void onRun()}>
+          {running ? "Scanning…" : "Run breakout scan"}
+        </Button>
+      </Stack>,
+    );
+  }, [running, confirmedOnly, setPageActions]);
+
+  const columns = useMemo(
+    () => [
+      columnFactories.createTextColumn<BreakoutConfirmation>({ field: "appSymbol", headerName: "Symbol", width: 110, getValue: (r) => r.appSymbol }),
+      columnFactories.createStatusColumn<BreakoutConfirmation>(
+        { buy: { label: "BUY", color: "#2e7d32" }, sell: { label: "SELL", color: "#c62828" } },
+        { field: "side", headerName: "Side", width: 90, getValue: (r) => r.side },
+      ),
+      columnFactories.createTextColumn<BreakoutConfirmation>({
+        field: "patternType",
+        headerName: "Pattern",
+        width: 150,
+        getValue: (r) => patternLabel(r.patternType),
+      }),
+      columnFactories.createBooleanColumn<BreakoutConfirmation>({ field: "confirmed", headerName: "OK", width: 70, getValue: (r) => r.confirmed }),
+      columnFactories.createNumberColumn<BreakoutConfirmation>({ field: "closePrice", headerName: "Close", width: 100, minDecimalPlaces: 2, getValue: (r) => r.closePrice ?? null }),
+      columnFactories.createNumberColumn<BreakoutConfirmation>({ field: "level20d", headerName: "Break lvl", width: 100, minDecimalPlaces: 2, getValue: (r) => r.level20d ?? null }),
+      columnFactories.createTextColumn<BreakoutConfirmation>({
+        field: "volumeRatio", headerName: "Vol×", width: 80,
+        getValue: (r) => (r.volumeRatio != null ? `${Number(r.volumeRatio).toFixed(2)}×` : ""),
+      }),
+    ],
+    [],
+  );
+
+  return (
+    <>
+      {error ? <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert> : null}
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <strong>Pattern breakouts</strong> for F&amp;O confirmation: range, ascending/descending
+        triangles, double top/bottom. First run may sync ~40 daily bars from Angel (a few minutes).
+        Turn off “Confirmed only” to see scanned near-misses.
+      </Alert>
+      <ZenTable columns={columns} rows={visible} getRowId={(r) => r.id} loading={loading} enableSearch
+        emptyMessage="No pattern breakouts. Click Run breakout scan." />
+    </>
+  );
+}

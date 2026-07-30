@@ -3,7 +3,6 @@ import type {
   BacktestNote,
   BacktestNoteInput,
   BacktestSymbolSummary,
-  ConfluenceSignal,
   LiquiditySignal,
   LtpQuote,
   OpenPosition,
@@ -68,22 +67,6 @@ export const DataFactory = {
       { runId: runId ?? null, ruleset },
     );
     return data.liquiditySignals;
-  },
-
-  async confluenceSignals(): Promise<ConfluenceSignal[]> {
-    const data = await gql<{ confluenceSignals: ConfluenceSignal[] }>(`
-      {
-        confluenceSignals {
-          id instrumentId appSymbol instrumentName side asOfDate
-          entryPrice initialStopLoss targetT1 targetT2 targetT3
-          analysisSignalId liquiditySignalId
-          signalsEntry liquidityEntry signalsStopLoss liquidityStopLoss
-          sectorConfirmed freshCross relativeVolume rvolPercentile strongClose
-          sweptZoneType timeframeContext
-        }
-      }
-    `);
-    return data.confluenceSignals;
   },
 
   async openPositions(): Promise<OpenPosition[]> {
@@ -199,24 +182,6 @@ export const ActionFactory = {
       { signalId, quantityLots },
     );
     return data.openPositionFromLiquiditySignal;
-  },
-
-  async openPositionFromConfluence(
-    liquiditySignalId: string,
-    analysisSignalId: string,
-    quantityLots = 1,
-  ): Promise<string> {
-    const data = await gql<{ openPositionFromConfluence: string }>(
-      `mutation ($liquiditySignalId: UUID!, $analysisSignalId: UUID!, $quantityLots: Int!) {
-        openPositionFromConfluence(
-          liquiditySignalId: $liquiditySignalId
-          analysisSignalId: $analysisSignalId
-          quantityLots: $quantityLots
-        )
-      }`,
-      { liquiditySignalId, analysisSignalId, quantityLots },
-    );
-    return data.openPositionFromConfluence;
   },
 
   async closePosition(positionId: string, exitPrice: number): Promise<boolean> {

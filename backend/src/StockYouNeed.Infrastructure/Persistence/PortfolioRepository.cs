@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Dapper;
 using StockYouNeed.Application.Abstractions;
-using StockYouNeed.Application.Services;
 using StockYouNeed.Domain;
 
 namespace StockYouNeed.Infrastructure.Persistence;
@@ -550,6 +549,44 @@ public sealed class PortfolioRepository : IPortfolioRepository
         }, cancellationToken: ct));
     }
 
+    public async Task<Guid> OpenPositionFromTradeScoreAsync(
+        Guid userId, Guid scoreId, int quantityLots, ITradeScoreRepository tradeScore, CancellationToken ct = default)
+    {
+        var row = await tradeScore.GetScoreAsync(scoreId, userId, ct)
+                  ?? throw new InvalidOperationException("Trade score row not found.");
+
+        const string sql = """
+            INSERT INTO positions (
+              user_id, instrument_id, signal_id, liquidity_signal_id, side, status,
+              quantity_lots, lot_size, quantity_units,
+              entry_price, entry_as_of_date, current_stop_loss,
+              target_t1, target_t2, target_t3, last_price)
+            VALUES (
+              @userId, @instrumentId, @analysisSignalId, @liquiditySignalId, @side::signal_side, 'open',
+              @quantityLots, 1, @quantityLots,
+              @entry, @asOf, @sl,
+              @t1, @t2, @t3, @entry)
+            RETURNING id
+            """;
+        using var conn = _db.CreateConnection();
+        await SetUserAsync(conn, userId);
+        return await conn.ExecuteScalarAsync<Guid>(new CommandDefinition(sql, new
+        {
+            userId,
+            instrumentId = row.InstrumentId,
+            analysisSignalId = row.AnalysisSignalId,
+            liquiditySignalId = row.LiquiditySignalId,
+            side = row.Side,
+            quantityLots,
+            entry = row.EntryPrice,
+            asOf = row.AsOfDate,
+            sl = row.InitialStopLoss,
+            t1 = row.TargetT1,
+            t2 = row.TargetT2,
+            t3 = row.TargetT3
+        }, cancellationToken: ct));
+    }
+
     public async Task<Guid> OpenPositionFromConfluenceAsync(
         Guid userId, Guid liquiditySignalId, Guid analysisSignalId, int quantityLots, CancellationToken ct = default)
     {
@@ -562,9 +599,9 @@ public sealed class PortfolioRepository : IPortfolioRepository
             || !string.Equals(liq.Side, sig.Side, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Confluence signals must match instrument and side.");
 
-        if (!ConfluenceSignalHelper.TryCombineLevels(
-            liq.Side, liq.EntryPrice, liq.InitialStopLoss,
-            sig.EntryPrice, sig.InitialStopLoss,
+        if (!Application.Confluence.ConfluenceLevelComposer.TryCompose(
+            liq.Side, sig.EntryPrice, sig.InitialStopLoss,
+            liq.EntryPrice, liq.InitialStopLoss,
             out var entry, out var sl))
             throw new InvalidOperationException("Signals and Liquidity entries are not within 0.2%.");
 

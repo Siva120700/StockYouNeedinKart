@@ -33,7 +33,7 @@ import {
   type ExportColumn,
 } from "../utils/exportTable";
 
-type StrategyFilter = "all" | "signals" | "liquidity" | "liquidity_fresh" | "confluence";
+type StrategyFilter = "all" | "signals" | "liquidity" | "liquidity_fresh" | "confluence" | "trade_score" | "breakout";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -65,6 +65,8 @@ function emptyForm(instrumentId: string): BacktestNoteInput {
 
 function strategyLabel(strategy: string | null | undefined): string {
   if (strategy === "confluence") return "Confluence";
+  if (strategy === "trade_score") return "Trade Score";
+  if (strategy === "breakout") return "Breakout";
   if (strategy === "liquidity_fresh") return "Liquidity Fresh";
   if (strategy === "liquidity") return "Liquidity";
   if (strategy === "signals") return "Signals";
@@ -75,11 +77,11 @@ function summaryRowId(row: BacktestSymbolSummary): string {
   return `${row.instrumentId}-${row.strategyFilter ?? "unknown"}`;
 }
 
-type BacktestStrategy = "signals" | "liquidity" | "liquidity_fresh" | "confluence";
+type BacktestStrategy = "signals" | "liquidity" | "liquidity_fresh" | "confluence" | "trade_score" | "breakout";
 
 function strategiesForFilter(filter: StrategyFilter): readonly BacktestStrategy[] {
   return filter === "all"
-    ? (["signals", "liquidity", "liquidity_fresh", "confluence"] as const)
+    ? (["signals", "liquidity", "liquidity_fresh", "confluence", "trade_score", "breakout"] as const)
     : ([filter] as const);
 }
 
@@ -276,6 +278,8 @@ export default function BacktestPage() {
       saved === "liquidity" ||
       saved === "liquidity_fresh" ||
       saved === "confluence" ||
+      saved === "trade_score" ||
+      saved === "breakout" ||
       saved === "all"
       ? saved
       : "all";
@@ -563,6 +567,8 @@ export default function BacktestPage() {
               <MenuItem value="liquidity">Liquidity</MenuItem>
               <MenuItem value="liquidity_fresh">Liquidity Fresh</MenuItem>
               <MenuItem value="confluence">Confluence</MenuItem>
+              <MenuItem value="breakout">Breakout</MenuItem>
+              <MenuItem value="trade_score">Trade Score</MenuItem>
             </Select>
           </FormControl>
           <Autocomplete
@@ -752,6 +758,8 @@ export default function BacktestPage() {
                   <MenuItem value="liquidity">Liquidity</MenuItem>
                   <MenuItem value="liquidity_fresh">Liquidity Fresh</MenuItem>
                   <MenuItem value="confluence">Confluence</MenuItem>
+                  <MenuItem value="breakout">Breakout</MenuItem>
+                  <MenuItem value="trade_score">Trade Score</MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" sx={{ minWidth: 100 }}>

@@ -13,7 +13,9 @@ public static class DependencyInjection
         services.AddScoped<LtpPollService>();
         services.AddScoped<AnalysisRunService>();
         services.AddScoped<LiquidityAnalysisService>();
-        services.AddScoped<ConfluenceService>();
+        services.AddScoped<Application.Confluence.ConfluenceService>();
+        services.AddScoped<Application.Breakout.BreakoutAnalysisService>();
+        services.AddScoped<TradeConfidenceService>();
         services.AddScoped<BacktestService>();
         services.AddScoped<UniverseSeedService>();
         return services;
