@@ -49,6 +49,8 @@ public sealed class AngelQuote
     public decimal? Close { get; set; }
     public long? TradeVolume { get; set; }
     public long? OpenInterest { get; set; }
+    public decimal? BestBid { get; set; }
+    public decimal? BestAsk { get; set; }
     public string RawJson { get; set; } = "{}";
 }
 

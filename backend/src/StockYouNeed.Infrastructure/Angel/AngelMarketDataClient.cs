@@ -177,6 +177,8 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
                 Close = GetDecimal(item, "close"),
                 TradeVolume = GetLong(item, "tradeVolume"),
                 OpenInterest = GetLong(item, "opnInterest") ?? GetLong(item, "openInterest"),
+                BestBid = GetDepthPrice(item, "buy"),
+                BestAsk = GetDepthPrice(item, "sell"),
                 RawJson = item.GetRawText()
             });
         }
@@ -407,6 +409,21 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
             JsonValueKind.String when long.TryParse(p.GetString(), out var d) => d,
             _ => null
         };
+    }
+
+    private static decimal? GetDepthPrice(JsonElement item, string side)
+    {
+        if (!item.TryGetProperty("depth", out var depth)
+            || depth.ValueKind != JsonValueKind.Object
+            || !depth.TryGetProperty(side, out var levels)
+            || levels.ValueKind != JsonValueKind.Array
+            || levels.GetArrayLength() == 0)
+            return null;
+
+        var first = levels[0];
+        return first.ValueKind == JsonValueKind.Object
+            ? GetDecimal(first, "price")
+            : null;
     }
 
     private sealed class AngelScripDto

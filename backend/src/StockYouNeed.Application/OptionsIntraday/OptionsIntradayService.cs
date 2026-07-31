@@ -12,6 +12,10 @@ namespace StockYouNeed.Application.OptionsIntraday;
 /// </summary>
 public sealed class OptionsIntradayService
 {
+    private const int MinConfidence = 75;
+    private const decimal MaxBidAskSpreadPct = 5m;
+    private static readonly TimeSpan FlatCutoffIst = new(15, 20, 0);
+
     private readonly IPortfolioRepository _portfolio;
     private readonly IOptionsIntradayRepository _repo;
     private readonly IMarketDataRepository _market;
@@ -44,12 +48,15 @@ public sealed class OptionsIntradayService
 
     public async Task<OptionsIntradayRunRow> RunAsync(Guid userId, CancellationToken ct = default)
     {
-        var asOf = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
+        var nowIst = DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5));
+        var asOf = DateOnly.FromDateTime(nowIst.DateTime);
+        var afterCutoff = nowIst.TimeOfDay >= FlatCutoffIst;
         var runId = await _repo.CreateRunAsync(userId, asOf, ct);
 
         try
         {
-            await _nfoSync.SyncUniverseNfoAsync(ct);
+            if (!afterCutoff)
+                await _nfoSync.SyncUniverseNfoAsync(ct);
 
             var liquidity = await _portfolio.GetLiquiditySignalsAsync(userId, null, "fresh", ct);
             var signals = await _portfolio.GetSignalsAsync(userId, null, ct);
@@ -112,12 +119,24 @@ public sealed class OptionsIntradayService
                 var reasons = new List<string> { source == "confluence" ? "Confluence aligned" : "Liquidity Fresh" };
                 var confidence = source == "confluence" ? 70 : 55;
 
+                if (afterCutoff)
+                {
+                    await PersistSkipped(
+                        runId, userId, liq, source, entry, sl, t1, t2, t3, spot,
+                        "not_checked", null, confidence, reasons,
+                        "15:20 IST cutoff reached — no new option entry", analysisId, ct);
+                    written++;
+                    continue;
+                }
+
                 string? buildUp = null;
                 decimal? premPct = null;
                 if (futures.Count > 0)
                 {
                     var fut = futures[0];
-                    var (fLtp, fOi) = await QuoteNfoAsync(fut.SymbolToken, ct);
+                    var fQuote = await QuoteNfoAsync(fut.SymbolToken, ct);
+                    var fLtp = fQuote.Ltp;
+                    var fOi = fQuote.Oi;
                     if (fLtp is decimal fl && spot > 0)
                     {
                         premPct = Math.Round((fl - spot) / spot * 100m, 4);
@@ -176,7 +195,9 @@ public sealed class OptionsIntradayService
                 if (primary is null)
                 {
                     await PersistSkipped(runId, userId, liq, source, entry, sl, t1, t2, t3, spot,
-                        buildUp, premPct, confidence, reasons, "No ATM/1ITM candidate", analysisId, ct);
+                        buildUp, premPct, confidence, reasons,
+                        $"No liquid ATM/1ITM contract with Δ {OptionStrikeSelector.MinLongDelta:0.00}–{OptionStrikeSelector.MaxLongDelta:0.00} and volume ≥ {OptionStrikeSelector.MinTradeVolume:0}",
+                        analysisId, ct);
                     written++;
                     continue;
                 }
@@ -185,29 +206,74 @@ public sealed class OptionsIntradayService
                 string? tradingSym = primary.Contract?.TradingSymbol;
                 string? token = primary.Contract?.SymbolToken;
                 int? lot = primary.Contract?.LotSize;
-                if (token is not null)
+                if (token is null)
                 {
-                    var (pLtp, _) = await QuoteNfoAsync(token, ct);
-                    prem = pLtp;
-                    if (pLtp is not null)
-                        await _repo.UpdateNfoQuoteAsync(token, pLtp, null, ct);
+                    await PersistSkipped(
+                        runId, userId, liq, source, entry, sl, t1, t2, t3, spot,
+                        buildUp, premPct, confidence, reasons,
+                        "Selected strike has no mapped NFO token; liquidity/spread cannot be verified",
+                        analysisId, ct);
+                    written++;
+                    continue;
                 }
-                else
+
+                var pQuote = await QuoteNfoAsync(token, ct);
+                prem = pQuote.Ltp;
+                if (prem is null or <= 0)
                 {
-                    // Contract map miss — still recommend strike from Greeks.
-                    tradingSym = $"{liq.AppSymbol} {primary.Strike:0.##} {primary.OptionType}";
+                    await PersistSkipped(
+                        runId, userId, liq, source, entry, sl, t1, t2, t3, spot,
+                        buildUp, premPct, confidence, reasons,
+                        "Option premium quote unavailable", analysisId, ct);
+                    written++;
+                    continue;
+                }
+                await _repo.UpdateNfoQuoteAsync(token, prem, pQuote.Oi, ct);
+
+                var spreadPct = SpreadPct(pQuote.Bid, pQuote.Ask);
+                if (spreadPct is null)
+                {
+                    await PersistSkipped(
+                        runId, userId, liq, source, entry, sl, t1, t2, t3, spot,
+                        buildUp, premPct, confidence, reasons,
+                        "Bid/ask depth unavailable; spread cannot be verified", analysisId, ct);
+                    written++;
+                    continue;
+                }
+                if (spreadPct > MaxBidAskSpreadPct)
+                {
+                    await PersistSkipped(
+                        runId, userId, liq, source, entry, sl, t1, t2, t3, spot,
+                        buildUp, premPct, confidence, reasons,
+                        $"Bid/ask spread {spreadPct:0.00}% exceeds {MaxBidAskSpreadPct:0.00}%",
+                        analysisId, ct);
+                    written++;
+                    continue;
                 }
 
                 decimal? altPrem = null;
                 if (alt?.Contract?.SymbolToken is string altTok)
                 {
-                    var (aLtp, _) = await QuoteNfoAsync(altTok, ct);
-                    altPrem = aLtp;
+                    altPrem = (await QuoteNfoAsync(altTok, ct)).Ltp;
                 }
 
                 if (primary.Delta is not null) reasons.Add($"Δ {Math.Abs(primary.Delta.Value):0.00} (long)");
                 if (primary.Iv is not null) reasons.Add($"IV {primary.Iv:0.0}%");
+                reasons.Add($"Volume {primary.Volume:0}");
+                reasons.Add($"Bid/ask spread {spreadPct:0.00}%");
                 confidence = Math.Clamp(confidence + 10, 0, 99);
+
+                if (confidence < MinConfidence)
+                {
+                    await PersistSkipped(
+                        runId, userId, liq, source, entry, sl, t1, t2, t3, spot,
+                        buildUp, premPct, confidence, reasons,
+                        $"Confidence {confidence} below required {MinConfidence}; require Confluence or supportive futures OI",
+                        analysisId, ct);
+                    written++;
+                    continue;
+                }
+                reasons.Add($"Confidence gate passed ({confidence} ≥ {MinConfidence})");
 
                 var row = new OptionsIntradayRecommendationRow
                 {
@@ -329,7 +395,10 @@ public sealed class OptionsIntradayService
         }, ct);
     }
 
-    private async Task<(decimal? Ltp, long? Oi)> QuoteNfoAsync(string token, CancellationToken ct)
+    private sealed record NfoQuoteSnapshot(
+        decimal? Ltp, long? Oi, long? Volume, decimal? Bid, decimal? Ask);
+
+    private async Task<NfoQuoteSnapshot> QuoteNfoAsync(string token, CancellationToken ct)
     {
         try
         {
@@ -338,13 +407,22 @@ public sealed class OptionsIntradayService
                 new Dictionary<string, IReadOnlyList<string>> { ["NFO"] = new[] { token } },
                 ct);
             var q = quotes.FirstOrDefault();
-            return (q?.Ltp, q?.OpenInterest);
+            return new NfoQuoteSnapshot(
+                q?.Ltp, q?.OpenInterest, q?.TradeVolume, q?.BestBid, q?.BestAsk);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "NFO quote failed for token {Token}", token);
-            return (null, null);
+            return new NfoQuoteSnapshot(null, null, null, null, null);
         }
+    }
+
+    private static decimal? SpreadPct(decimal? bid, decimal? ask)
+    {
+        if (bid is null or <= 0 || ask is null or <= 0 || ask < bid)
+            return null;
+        var mid = (bid.Value + ask.Value) / 2m;
+        return mid <= 0 ? null : Math.Round((ask.Value - bid.Value) / mid * 100m, 4);
     }
 
     private static string ClassifyBuildUp(string side, long? newOi, long? oldOi, decimal? premiumPct)

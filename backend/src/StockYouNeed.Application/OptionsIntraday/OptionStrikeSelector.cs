@@ -12,6 +12,10 @@ namespace StockYouNeed.Application.OptionsIntraday;
 /// </summary>
 public static class OptionStrikeSelector
 {
+    public const decimal MinLongDelta = 0.45m;
+    public const decimal MaxLongDelta = 0.60m;
+    public const decimal MinTradeVolume = 100m;
+
     public sealed record Candidate(
         decimal Strike,
         string OptionType,
@@ -77,13 +81,17 @@ public static class OptionStrikeSelector
         var ordered = candidates.OrderByDescending(c => c.Score).ToList();
         if (ordered.Count == 0) return (null, null);
 
-        // Long option: positive delta band 0.45–0.60 preferred.
-        var inBand = ordered.Where(c => c.Delta is >= 0.45m and <= 0.60m).ToList();
-        var pool = inBand.Count > 0 ? inBand : ordered.Where(c => c.Delta is >= 0.35m and <= 0.70m).ToList();
-        if (pool.Count == 0) pool = ordered;
+        // Hard execution gate: only ATM/1ITM contracts in the desired long-delta
+        // band with meaningful traded volume are eligible.
+        var eligible = ordered
+            .Where(c => c.Delta is >= MinLongDelta and <= MaxLongDelta)
+            .Where(c => c.Volume is >= MinTradeVolume)
+            .ToList();
+        if (eligible.Count == 0)
+            return (null, null);
 
-        var primary = pool[0];
-        var alt = pool.Skip(1).FirstOrDefault() ?? ordered.Skip(1).FirstOrDefault();
+        var primary = eligible[0];
+        var alt = eligible.Skip(1).FirstOrDefault();
         return (primary, alt);
     }
 

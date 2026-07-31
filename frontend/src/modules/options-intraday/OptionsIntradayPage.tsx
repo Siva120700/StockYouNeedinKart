@@ -197,9 +197,10 @@ export default function OptionsIntradayPage() {
     <Stack spacing={2} p={2}>
       {error && <Alert severity="error">{error}</Alert>}
       <Alert severity="info">
-        Direction and exits come from the stock (Liquidity Fresh / Confluence). Option strike is
-        chosen via Angel Greeks (ATM / 1 ITM). Exit when spot hits Stock SL or T1 — flat by 15:20.
-        Run Liquidity Fresh first if this list is empty.
+        Direction, entry, SL and T1 come only from the underlying stock. Recommendations require
+        confidence ≥75 (Confluence or supportive futures OI), ATM/1ITM Δ 0.45–0.60, volume ≥100,
+        and bid/ask spread ≤5%. Exit when spot hits Stock SL or T1. No new entries at/after 15:20
+        IST; all positions must be flat by 15:20.
       </Alert>
       <ZenTable
         rows={visible}
