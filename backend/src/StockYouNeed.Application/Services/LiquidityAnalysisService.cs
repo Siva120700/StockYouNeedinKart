@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using StockYouNeed.Application.Abstractions;
 using StockYouNeed.Application.Options;
 using StockYouNeed.Application.Outcomes;
+using StockYouNeed.Application.Signals;
 using StockYouNeed.Domain;
 
 namespace StockYouNeed.Application.Services;
@@ -139,7 +140,9 @@ public sealed class LiquidityAnalysisService
             var signals = 0;
             var fewBars = 0;
             var noSetup = 0;
+            var skippedFlip = 0;
             var sectorConfirmedCount = 0;
+            var openOutcomes = await _outcomes.GetOpenAsync(userId, ct);
 
             foreach (var token in tokens)
             {
@@ -176,6 +179,16 @@ public sealed class LiquidityAnalysisService
                     continue;
                 }
 
+                if (OppositeSignalFlipGuard.IsFlipAgainstOpen(
+                        token.InstrumentId, signal.Side, asOf, openOutcomes, out var flipReason))
+                {
+                    skippedFlip++;
+                    _logger.LogInformation(
+                        "Liquidity ({Ruleset}) skip {Symbol}: {Reason}",
+                        ruleset, token.AppSymbol, flipReason);
+                    continue;
+                }
+
                 var sectorId = await _instruments.GetSectorIdForInstrumentAsync(token.InstrumentId, ct);
                 if (sectorId is not null && sectorBarsCache.TryGetValue(sectorId.Value, out var sectorBars))
                 {
@@ -199,12 +212,13 @@ public sealed class LiquidityAnalysisService
             stats["sectorConfirmed"] = sectorConfirmedCount;
             stats["fewIntradayBars"] = fewBars;
             stats["noSetup"] = noSetup;
+            stats["skippedFlip"] = skippedFlip;
             _ = watchIds; // reserved for future universe narrowing
 
             await _portfolio.CompleteLiquidityAnalysisRunAsync(runId, "succeeded", null, stats, ct);
             _logger.LogInformation(
-                "Liquidity run {RunId} ({Ruleset}): scanned={Scanned}, signals={Signals}, sectorConfirmed={SectorConfirmed}, fewBars={Few}, noSetup={No}",
-                runId, ruleset, scanned, signals, sectorConfirmedCount, fewBars, noSetup);
+                "Liquidity run {RunId} ({Ruleset}): scanned={Scanned}, signals={Signals}, sectorConfirmed={SectorConfirmed}, fewBars={Few}, noSetup={No}, skippedFlip={Flip}",
+                runId, ruleset, scanned, signals, sectorConfirmedCount, fewBars, noSetup, skippedFlip);
 
             return new AnalysisRunRow
             {
@@ -320,6 +334,23 @@ public sealed class LiquidityAnalysisService
         await ApplySectorConfirmAsync(fresh, instrumentId, ct);
         await ApplySectorConfirmAsync(classic, instrumentId, ct);
 
+        var evalDetailParts = new List<string>();
+        var openOutcomes = await _outcomes.GetOpenAsync(userId, ct);
+        if (fresh is not null
+            && OppositeSignalFlipGuard.IsFlipAgainstOpen(
+                instrumentId, fresh.Side, asOf, openOutcomes, out var freshFlip))
+        {
+            evalDetailParts.Add($"Fresh skipped: {freshFlip}");
+            fresh = null;
+        }
+        if (classic is not null
+            && OppositeSignalFlipGuard.IsFlipAgainstOpen(
+                instrumentId, classic.Side, asOf, openOutcomes, out var classicFlip))
+        {
+            evalDetailParts.Add($"Classic skipped: {classicFlip}");
+            classic = null;
+        }
+
         var sweep = Detect4hSweep(bars4h, daily, maxBars: 4);
         var nearest = NearestZone(mark, zonesInternal);
         var eval = new LiquidityInstrumentEval
@@ -344,18 +375,23 @@ public sealed class LiquidityAnalysisService
         if (fresh is not null || classic is not null)
         {
             eval.Status = "evaluated";
+            if (evalDetailParts.Count > 0)
+                eval.Detail = string.Join(" ", evalDetailParts);
             return eval;
         }
 
         eval.Status = "no_setup";
-        eval.Detail = sweep is null
+        var baseDetail = sweep is null
             ? "Zones computed; no 4H sweep + 1H confirm setup right now."
             : $"Recent {sweep.Side} sweep of {sweep.ZoneType} @ {RoundPrice(sweep.ZonePrice)} — waiting 1H confirm / RVOL / strong close.";
         if (nearest is not null && mark > 0)
         {
             var dist = Math.Round(Math.Abs(mark - nearest.Price) / mark * 100m, 2);
-            eval.Detail += $" Nearest {nearest.Type} @ {RoundPrice(nearest.Price)} ({dist}% away).";
+            baseDetail += $" Nearest {nearest.Type} @ {RoundPrice(nearest.Price)} ({dist}% away).";
         }
+        if (evalDetailParts.Count > 0)
+            baseDetail = string.Join(" ", evalDetailParts) + " " + baseDetail;
+        eval.Detail = baseDetail;
 
         return eval;
     }

@@ -151,6 +151,10 @@ public sealed class SignalOutcomeService
         Guid userId, string? strategy, string? result, CancellationToken ct = default)
         => _outcomes.GetOutcomesAsync(userId, strategy, result, ct);
 
+    public Task<IReadOnlyList<SignalOutcomeRow>> GetOpenAsync(
+        Guid userId, CancellationToken ct = default)
+        => _outcomes.GetOpenAsync(userId, ct);
+
     public Task<IReadOnlyList<SignalOutcomeSummary>> GetSummariesAsync(
         Guid userId, string? strategy, CancellationToken ct = default)
         => _outcomes.GetSummariesAsync(userId, strategy, ct);

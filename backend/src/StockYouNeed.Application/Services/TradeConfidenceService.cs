@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using StockYouNeed.Application.Abstractions;
 using StockYouNeed.Application.Outcomes;
+using StockYouNeed.Application.Signals;
 using StockYouNeed.Application.TradeScore;
 using StockYouNeed.Domain;
 
@@ -71,6 +72,17 @@ public sealed class TradeConfidenceService
                 signal.InstrumentName = instrument.Name;
         }
 
+        string? flipReason = null;
+        if (signal is not null)
+        {
+            var openOutcomes = await _outcomes.GetOpenAsync(userId, ct);
+            if (OppositeSignalFlipGuard.IsFlipAgainstOpen(
+                    instrument.Id, signal.Side, asOf, openOutcomes, out flipReason))
+            {
+                signal = null;
+            }
+        }
+
         var breakout = bars.Count >= 21
             ? BreakoutConfirmationEvaluator.Evaluate(bars)
             : null;
@@ -100,7 +112,9 @@ public sealed class TradeConfidenceService
             breakoutLabel = breakout.PatternType.Replace('_', ' ');
 
         if (signal is null)
-            reasons.Add("Daily signal absent (+0/20)");
+            reasons.Add(flipReason is null
+                ? "Daily signal absent (+0/20)"
+                : $"Daily signal skipped — {flipReason} (+0/20)");
         else
             reasons.Add("Daily signal present (+20/20)");
 
@@ -206,11 +220,30 @@ public sealed class TradeConfidenceService
 
             var signals = await _portfolio.GetSignalsAsync(userId, null, ct);
             var liquidity = await _portfolio.GetLiquiditySignalsAsync(userId, null, "fresh", ct);
+            var openOutcomes = await _outcomes.GetOpenAsync(userId, ct);
             var scored = 0;
+            var skippedFlip = 0;
 
             foreach (var sig in signals)
             {
                 ct.ThrowIfCancellationRequested();
+
+                // Ignore the same outcome row that belongs to this signal itself.
+                var flipPeers = openOutcomes.Where(o =>
+                    o.AnalysisSignalId != sig.Id
+                    && !(o.Strategy == "signals"
+                         && o.InstrumentId == sig.InstrumentId
+                         && o.SignalDate == sig.AsOfDate
+                         && string.Equals(o.Side, sig.Side, StringComparison.OrdinalIgnoreCase)));
+
+                if (OppositeSignalFlipGuard.IsFlipAgainstOpen(
+                        sig.InstrumentId, sig.Side, sig.AsOfDate, flipPeers, out var flipReason))
+                {
+                    skippedFlip++;
+                    _logger.LogInformation(
+                        "Trade Score skip {Symbol}: {Reason}", sig.AppSymbol, flipReason);
+                    continue;
+                }
 
                 var liq = liquidity.FirstOrDefault(l =>
                     l.InstrumentId == sig.InstrumentId
@@ -293,7 +326,9 @@ public sealed class TradeConfidenceService
             }
 
             await _tradeScore.CompleteRunAsync(runId, userId, "succeeded", null, ct);
-            _logger.LogInformation("Trade confidence run {RunId}: {Scored} scored rows", runId, scored);
+            _logger.LogInformation(
+                "Trade confidence run {RunId}: {Scored} scored rows, skippedFlip={Flip}",
+                runId, scored, skippedFlip);
 
             return new TradeConfidenceRunRow
             {

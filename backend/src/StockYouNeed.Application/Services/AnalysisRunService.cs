@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using StockYouNeed.Application.Abstractions;
 using StockYouNeed.Application.Options;
 using StockYouNeed.Application.Outcomes;
+using StockYouNeed.Application.Signals;
 using StockYouNeed.Domain;
 
 namespace StockYouNeed.Application.Services;
@@ -226,7 +227,10 @@ public sealed class AnalysisRunService
             var signalCount = 0;
             var skippedFewBars = 0;
             var noSetup = 0;
+            var skippedFlip = 0;
             var sectorConfirmedCount = 0;
+            var openOutcomes = await _outcomes.GetOpenAsync(userId, ct);
+
             foreach (var instrumentId in instrumentIds)
             {
                 var bars = (await _market.GetBarsForInstrumentAsync(instrumentId, 10, ct))
@@ -244,6 +248,15 @@ public sealed class AnalysisRunService
                 if (signal is null)
                 {
                     noSetup++;
+                    continue;
+                }
+
+                if (OppositeSignalFlipGuard.IsFlipAgainstOpen(
+                        instrumentId, signal.Side, asOf, openOutcomes, out var flipReason))
+                {
+                    skippedFlip++;
+                    _logger.LogInformation(
+                        "Signals skip {Symbol}: {Reason}", signal.AppSymbol, flipReason);
                     continue;
                 }
 
@@ -266,8 +279,8 @@ public sealed class AnalysisRunService
             }
 
             _logger.LogInformation(
-                "Analysis {RunId}: scanned={Scanned}, signals={Signals}, sectorConfirmed={SectorConfirmed}, fewBars={FewBars}, noSetup={NoSetup}, liveQuotes={LiveQuotes}",
-                runId, instrumentIds.Count, signalCount, sectorConfirmedCount, skippedFewBars, noSetup, livePrices.Count);
+                "Analysis {RunId}: scanned={Scanned}, signals={Signals}, sectorConfirmed={SectorConfirmed}, fewBars={FewBars}, noSetup={NoSetup}, skippedFlip={SkippedFlip}, liveQuotes={LiveQuotes}",
+                runId, instrumentIds.Count, signalCount, sectorConfirmedCount, skippedFewBars, noSetup, skippedFlip, livePrices.Count);
 
             await _portfolio.CompleteAnalysisRunAsync(
                 runId,
@@ -280,6 +293,7 @@ public sealed class AnalysisRunService
                     sectorConfirmed = sectorConfirmedCount,
                     fewBars = skippedFewBars,
                     noSetup,
+                    skippedFlip,
                     liveQuotes = livePrices.Count
                 },
                 ct);

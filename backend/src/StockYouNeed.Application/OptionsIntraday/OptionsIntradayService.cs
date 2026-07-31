@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using StockYouNeed.Application.Abstractions;
 using StockYouNeed.Application.Outcomes;
+using StockYouNeed.Application.Signals;
 using StockYouNeed.Domain;
 
 namespace StockYouNeed.Application.OptionsIntraday;
@@ -56,13 +57,24 @@ public sealed class OptionsIntradayService
                 .ToDictionary(x => x.InstrumentId, x => x.Ltp);
 
             var written = 0;
+            var skippedFlip = 0;
             var seen = new HashSet<(Guid Inst, string Side)>();
+            var openOutcomes = await _outcomes.GetOpenAsync(userId, ct);
 
             foreach (var liq in liquidity)
             {
                 ct.ThrowIfCancellationRequested();
                 var key = (liq.InstrumentId, liq.Side.ToLowerInvariant());
                 if (!seen.Add(key)) continue;
+
+                if (OppositeSignalFlipGuard.IsFlipAgainstOpen(
+                        liq.InstrumentId, liq.Side, asOf, openOutcomes, out var flipReason))
+                {
+                    skippedFlip++;
+                    _logger.LogInformation(
+                        "Options Intraday skip {Symbol}: {Reason}", liq.AppSymbol, flipReason);
+                    continue;
+                }
 
                 var sig = signals.FirstOrDefault(s =>
                     s.InstrumentId == liq.InstrumentId
@@ -263,7 +275,9 @@ public sealed class OptionsIntradayService
             }
 
             await _repo.CompleteRunAsync(runId, userId, "succeeded", null, ct);
-            _logger.LogInformation("Options Intraday run {RunId}: {Count} rows", runId, written);
+            _logger.LogInformation(
+                "Options Intraday run {RunId}: {Count} rows, skippedFlip={Flip}",
+                runId, written, skippedFlip);
 
             return new OptionsIntradayRunRow
             {
