@@ -31,6 +31,10 @@ public interface IAngelMarketDataClient
         CancellationToken ct = default);
 
     Task<IReadOnlyList<AngelScrip>> DownloadScripMasterAsync(CancellationToken ct = default);
+
+    /// <summary>Angel optionGreek — name = underlying, expirydate = DDMMMYYYY.</summary>
+    Task<IReadOnlyList<AngelOptionGreek>> GetOptionGreeksAsync(
+        string name, string expiryDateLabel, CancellationToken ct = default);
 }
 
 public sealed class AngelQuote
@@ -44,6 +48,7 @@ public sealed class AngelQuote
     public decimal? Low { get; set; }
     public decimal? Close { get; set; }
     public long? TradeVolume { get; set; }
+    public long? OpenInterest { get; set; }
     public string RawJson { get; set; } = "{}";
 }
 
@@ -69,6 +74,22 @@ public sealed class AngelScrip
     public string LotSize { get; set; } = "1";
     public string TickSize { get; set; } = "0.05";
     public string Expiry { get; set; } = "";
+    /// <summary>Raw Angel strike (often ×100 for equity options).</summary>
+    public string Strike { get; set; } = "";
+}
+
+public sealed class AngelOptionGreek
+{
+    public string Name { get; set; } = "";
+    public string Expiry { get; set; } = "";
+    public decimal StrikePrice { get; set; }
+    public string OptionType { get; set; } = "";
+    public decimal? Delta { get; set; }
+    public decimal? Gamma { get; set; }
+    public decimal? Theta { get; set; }
+    public decimal? Vega { get; set; }
+    public decimal? ImpliedVolatility { get; set; }
+    public decimal? TradeVolume { get; set; }
 }
 
 public interface IInstrumentRepository
@@ -187,6 +208,19 @@ public interface ISignalOutcomeRepository
     Task ResolveAsync(SignalOutcomeRow row, CancellationToken ct = default);
     Task<IReadOnlyList<SignalOutcomeSummary>> GetSummariesAsync(
         Guid userId, string? strategy, CancellationToken ct = default);
+}
+
+public interface IOptionsIntradayRepository
+{
+    Task ReplaceNfoContractsAsync(IReadOnlyList<NfoContractRow> rows, CancellationToken ct = default);
+    Task<IReadOnlyList<NfoContractRow>> GetNfoForUnderlyingAsync(
+        Guid underlyingInstrumentId, CancellationToken ct = default);
+    Task UpdateNfoQuoteAsync(string symbolToken, decimal? ltp, long? oi, CancellationToken ct = default);
+    Task<Guid> CreateRunAsync(Guid userId, DateOnly asOfDate, CancellationToken ct = default);
+    Task CompleteRunAsync(Guid runId, Guid userId, string status, string? errorMessage, CancellationToken ct = default);
+    Task InsertRecommendationAsync(OptionsIntradayRecommendationRow row, CancellationToken ct = default);
+    Task<IReadOnlyList<OptionsIntradayRecommendationRow>> GetRecommendationsAsync(
+        Guid userId, Guid? runId, CancellationToken ct = default);
 }
 
 public interface ICurrentUserAccessor

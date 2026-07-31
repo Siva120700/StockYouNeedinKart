@@ -34,6 +34,7 @@ public static class DependencyInjection
         services.AddScoped<ITradeScoreRepository, TradeScoreRepository>();
         services.AddScoped<IBreakoutRepository, BreakoutRepository>();
         services.AddScoped<ISignalOutcomeRepository, SignalOutcomeRepository>();
+        services.AddScoped<IOptionsIntradayRepository, OptionsIntradayRepository>();
         services.AddSingleton<DatabaseMigrator>();
 
         return services;

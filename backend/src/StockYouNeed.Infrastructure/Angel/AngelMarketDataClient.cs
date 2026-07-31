@@ -176,7 +176,62 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
                 Low = GetDecimal(item, "low"),
                 Close = GetDecimal(item, "close"),
                 TradeVolume = GetLong(item, "tradeVolume"),
+                OpenInterest = GetLong(item, "opnInterest") ?? GetLong(item, "openInterest"),
                 RawJson = item.GetRawText()
+            });
+        }
+
+        return list;
+    }
+
+    public async Task<IReadOnlyList<AngelOptionGreek>> GetOptionGreeksAsync(
+        string name, string expiryDateLabel, CancellationToken ct = default)
+    {
+        await EnsureSessionAsync(ct);
+        using var req = CreateSecureRequest(
+            HttpMethod.Post, "rest/secure/angelbroking/marketData/v1/optionGreek");
+        req.Content = JsonContent.Create(new { name, expirydate = expiryDateLabel });
+
+        await PaceBeforeRequestAsync(ct);
+        var res = await _http.SendAsync(req, ct);
+        var body = await res.Content.ReadAsStringAsync(ct);
+        if (!res.IsSuccessStatusCode || string.IsNullOrWhiteSpace(body) || body[0] is not ('{' or '['))
+        {
+            _logger.LogWarning("optionGreek HTTP {Status} for {Name} {Expiry}: {Body}",
+                (int)res.StatusCode, name, expiryDateLabel, body.Length > 200 ? body[..200] : body);
+            return Array.Empty<AngelOptionGreek>();
+        }
+
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+        var ok = root.TryGetProperty("status", out var st) && st.ValueKind == JsonValueKind.True;
+        if (!ok)
+        {
+            var msg = root.TryGetProperty("message", out var m) ? m.GetString() : body;
+            var code = root.TryGetProperty("errorcode", out var c) ? c.GetString() : "";
+            _logger.LogWarning("optionGreek failed for {Name} {Expiry}: {Code} {Message}",
+                name, expiryDateLabel, code, msg);
+            return Array.Empty<AngelOptionGreek>();
+        }
+
+        var list = new List<AngelOptionGreek>();
+        if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+            return list;
+
+        foreach (var item in data.EnumerateArray())
+        {
+            list.Add(new AngelOptionGreek
+            {
+                Name = GetString(item, "name"),
+                Expiry = GetString(item, "expiry"),
+                StrikePrice = GetDecimal(item, "strikePrice") ?? 0,
+                OptionType = GetString(item, "optionType"),
+                Delta = GetDecimal(item, "delta"),
+                Gamma = GetDecimal(item, "gamma"),
+                Theta = GetDecimal(item, "theta"),
+                Vega = GetDecimal(item, "vega"),
+                ImpliedVolatility = GetDecimal(item, "impliedVolatility"),
+                TradeVolume = GetDecimal(item, "tradeVolume"),
             });
         }
 
@@ -283,7 +338,8 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
             InstrumentType = s.InstrumentType ?? "",
             LotSize = s.LotSize ?? "1",
             TickSize = s.TickSize ?? "0.05",
-            Expiry = s.Expiry ?? ""
+            Expiry = s.Expiry ?? "",
+            Strike = s.Strike ?? ""
         }).ToList();
     }
 
@@ -363,5 +419,6 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
         [JsonPropertyName("lotsize")] public string? LotSize { get; set; }
         [JsonPropertyName("tick_size")] public string? TickSize { get; set; }
         [JsonPropertyName("expiry")] public string? Expiry { get; set; }
+        [JsonPropertyName("strike")] public string? Strike { get; set; }
     }
 }

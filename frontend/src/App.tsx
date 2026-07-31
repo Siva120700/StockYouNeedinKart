@@ -9,6 +9,7 @@ import TradeScorePage from "./modules/trade-score/TradeScorePage";
 import ConfluencePage from "./modules/confluence/ConfluencePage";
 import BreakoutPage from "./modules/breakout/BreakoutPage";
 import OutcomesPage from "./modules/outcomes/OutcomesPage";
+import OptionsIntradayPage from "./modules/options-intraday/OptionsIntradayPage";
 import BacktestPage from "./pages/BacktestPage";
 import PositionsPage from "./pages/PositionsPage";
 
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="/breakout" element={<BreakoutPage />} />
               <Route path="/trade-score" element={<TradeScorePage />} />
               <Route path="/accuracy" element={<OutcomesPage />} />
+              <Route path="/options-intraday" element={<OptionsIntradayPage />} />
               <Route path="/backtest" element={<BacktestPage />} />
               <Route path="/positions" element={<PositionsPage />} />
             </Routes>

@@ -80,6 +80,22 @@ public sealed class Query
         CancellationToken ct)
         => await portfolio.GetWatchlistAsync(user.UserId, ct);
 
+    public async Task<IReadOnlyList<OptionsIntradayRecommendationRow>> OptionsIntradayRecommendations(
+        Guid? runId,
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.OptionsIntraday.OptionsIntradayService options,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await options.GetRecommendationsAsync(user.UserId, runId, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
     public async Task<IReadOnlyList<BacktestNoteRow>> BacktestNotes(
         Guid? instrumentId,
         string? strategy,
@@ -174,7 +190,7 @@ public sealed class Query
     {
         if (string.IsNullOrWhiteSpace(strategy)) return null;
         var s = strategy.Trim().ToLowerInvariant();
-        return s is "signals" or "liquidity" or "liquidity_fresh" or "confluence" or "trade_score" or "breakout" ? s : null;
+        return s is "signals" or "liquidity" or "liquidity_fresh" or "confluence" or "trade_score" or "breakout" or "options_intraday" ? s : null;
     }
 
     private static string? NormalizeOutcomeResult(string? result)
@@ -427,6 +443,21 @@ public sealed class Mutation
         try
         {
             return await outcomes.BackfillFromLiveAsync(user.UserId, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
+    public async Task<OptionsIntradayRunRow> RunOptionsIntradayAnalysis(
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.OptionsIntraday.OptionsIntradayService options,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await options.RunAsync(user.UserId, ct);
         }
         catch (Exception ex)
         {

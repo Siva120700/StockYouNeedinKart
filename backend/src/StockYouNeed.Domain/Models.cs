@@ -371,3 +371,77 @@ public sealed class SignalOutcomeSummary
     public decimal? AvgRiskReward { get; set; }
     public decimal? AvgRMultiple { get; set; }
 }
+
+public sealed class NfoContractRow
+{
+    public Guid Id { get; set; }
+    public Guid UnderlyingInstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string AngelName { get; set; } = "";
+    public string Kind { get; set; } = "option";
+    public string? OptionType { get; set; }
+    public decimal? Strike { get; set; }
+    public DateOnly Expiry { get; set; }
+    public string ExpiryLabel { get; set; } = "";
+    public string SymbolToken { get; set; } = "";
+    public string TradingSymbol { get; set; } = "";
+    public int LotSize { get; set; } = 1;
+    public decimal TickSize { get; set; } = 0.05m;
+    public long? LastOi { get; set; }
+    public decimal? LastLtp { get; set; }
+}
+
+public sealed class OptionsIntradayRunRow
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public DateOnly AsOfDate { get; set; }
+    public string Status { get; set; } = "running";
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>One Options Intraday idea: stock setup + recommended contract.</summary>
+public sealed class OptionsIntradayRecommendationRow
+{
+    public Guid Id { get; set; }
+    public Guid RunId { get; set; }
+    public Guid UserId { get; set; }
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string InstrumentName { get; set; } = "";
+    public string Side { get; set; } = "buy";
+    public string SignalSource { get; set; } = "liquidity_fresh";
+    public string Status { get; set; } = "recommended";
+    public string? SkipReason { get; set; }
+    public decimal? SpotLtp { get; set; }
+    public decimal UnderlyingEntry { get; set; }
+    public decimal UnderlyingStopLoss { get; set; }
+    public decimal? UnderlyingTargetT1 { get; set; }
+    public decimal? UnderlyingTargetT2 { get; set; }
+    public decimal? UnderlyingTargetT3 { get; set; }
+    public string? FuturesBuildUp { get; set; }
+    public decimal? FuturesPremiumPct { get; set; }
+    public int ConfidenceScore { get; set; }
+    public string[] Reasons { get; set; } = Array.Empty<string>();
+    public string? ContractTradingSymbol { get; set; }
+    public string? ContractExpiryLabel { get; set; }
+    public decimal? ContractStrike { get; set; }
+    public string? ContractOptionType { get; set; }
+    public string? ContractToken { get; set; }
+    public int? ContractLotSize { get; set; }
+    public decimal? PremiumLtp { get; set; }
+    public decimal? Delta { get; set; }
+    public decimal? Gamma { get; set; }
+    public decimal? Theta { get; set; }
+    public decimal? Vega { get; set; }
+    public decimal? ImpliedVolatility { get; set; }
+    public decimal? TradeVolume { get; set; }
+    public string? AltTradingSymbol { get; set; }
+    public decimal? AltStrike { get; set; }
+    public decimal? AltDelta { get; set; }
+    public decimal? AltImpliedVolatility { get; set; }
+    public decimal? AltPremiumLtp { get; set; }
+    public string FlatByIst { get; set; } = "15:20";
+    public Guid? LiquiditySignalId { get; set; }
+    public Guid? AnalysisSignalId { get; set; }
+}

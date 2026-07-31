@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using StockYouNeed.Application.OptionsIntraday;
 using StockYouNeed.Application.Outcomes;
 using StockYouNeed.Application.Services;
 
@@ -13,6 +14,8 @@ public static class DependencyInjection
         services.AddScoped<IntradayBarsSyncService>();
         services.AddScoped<LtpPollService>();
         services.AddScoped<SignalOutcomeService>();
+        services.AddScoped<NfoSyncService>();
+        services.AddScoped<OptionsIntradayService>();
         services.AddScoped<AnalysisRunService>();
         services.AddScoped<LiquidityAnalysisService>();
         services.AddScoped<Application.Confluence.ConfluenceService>();
