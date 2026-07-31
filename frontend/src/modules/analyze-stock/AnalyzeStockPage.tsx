@@ -16,6 +16,7 @@ import type { UniverseInstrument } from "../../api/types";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { AnalyzeStockApi } from "./api";
+import { buildNextMoveSections } from "./nextMove";
 import {
   fmt,
   sourceLabel,
@@ -183,6 +184,36 @@ export default function AnalyzeStockPage() {
               ))}
             </Stack>
           )}
+
+          <Box
+            sx={{
+              mt: 2.5,
+              p: 2,
+              borderRadius: 1,
+              border: "1px solid",
+              borderColor: "divider",
+              bgcolor: "background.default",
+            }}
+          >
+            <Typography variant="subtitle1" fontWeight={800} gutterBottom>
+              What can be the next move
+            </Typography>
+            <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+              Plain-language reading of this stock’s live engines — not a buy/sell order.
+            </Typography>
+            <Stack spacing={2}>
+              {buildNextMoveSections(result).map((s) => (
+                <Box key={s.title}>
+                  <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                    {s.title}
+                  </Typography>
+                  <Typography variant="body2" color="text.primary" sx={{ lineHeight: 1.6 }}>
+                    {s.body}
+                  </Typography>
+                </Box>
+              ))}
+            </Stack>
+          </Box>
 
           <Divider sx={{ my: 2 }} />
 
