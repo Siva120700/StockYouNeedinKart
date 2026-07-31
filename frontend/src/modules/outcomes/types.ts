@@ -47,7 +47,41 @@ export function strategyLabel(strategy: string | null | undefined): string {
       return "Trade Score";
     case "breakout":
       return "Breakout";
+    case "options_intraday":
+      return "Options Intraday";
     default:
       return strategy ?? "All";
+  }
+}
+
+export function resultLabel(result: string): string {
+  switch (result) {
+    case "target":
+      return "Target";
+    case "sl":
+      return "SL";
+    case "time_stop":
+      return "Time stop";
+    case "open":
+      return "Open";
+    default:
+      return result;
+  }
+}
+
+export function resultColor(
+  result: string,
+): "success" | "error" | "warning" | "default" | "info" {
+  switch (result) {
+    case "target":
+      return "success";
+    case "sl":
+      return "error";
+    case "time_stop":
+      return "warning";
+    case "open":
+      return "info";
+    default:
+      return "default";
   }
 }

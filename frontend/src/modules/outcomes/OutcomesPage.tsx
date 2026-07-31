@@ -1,19 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Button,
+  Chip,
   MenuItem,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
-import { ArrowsClockwise, DownloadSimple, Play } from "@phosphor-icons/react";
+import { ArrowsClockwise, CaretDown, DownloadSimple, Play } from "@phosphor-icons/react";
 import { columnFactories } from "../../zen_components/table/columnFactories";
 import ZenTable from "../../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { OutcomesApi } from "./api";
-import { strategyLabel, type SignalOutcome, type SignalOutcomeSummary } from "./types";
+import {
+  resultLabel,
+  strategyLabel,
+  type SignalOutcome,
+  type SignalOutcomeSummary,
+} from "./types";
 
 type StrategyFilter =
   | "all"
@@ -22,7 +31,8 @@ type StrategyFilter =
   | "liquidity_fresh"
   | "confluence"
   | "trade_score"
-  | "breakout";
+  | "breakout"
+  | "options_intraday";
 
 type ResultFilter = "all" | "open" | "target" | "sl" | "time_stop";
 
@@ -31,13 +41,49 @@ function fmt(n: number | null | undefined, digits = 2): string {
   return Number(n).toFixed(digits);
 }
 
+function strategyKey(summary: SignalOutcomeSummary): string {
+  return summary.strategyFilter ?? "all";
+}
+
+function outcomesForStrategy(
+  allOutcomes: SignalOutcome[],
+  strategy: string | null,
+): SignalOutcome[] {
+  if (!strategy || strategy === "all") return allOutcomes;
+  return allOutcomes.filter((o) => o.strategy === strategy);
+}
+
+/** Calendar days from entry (signal) date to exit date; null while still open. */
+function durationDays(entryDate: string, exitDate: string | null | undefined): number | null {
+  if (!exitDate) return null;
+  const a = Date.parse(entryDate);
+  const b = Date.parse(exitDate);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  return Math.max(0, Math.round((b - a) / 86_400_000));
+}
+
+function avgDurationDays(list: SignalOutcome[]): number | null {
+  const days = list
+    .map((o) => durationDays(o.signalDate, o.exitDate))
+    .filter((d): d is number => d != null);
+  if (days.length === 0) return null;
+  return days.reduce((s, d) => s + d, 0) / days.length;
+}
+
+function fmtDays(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return `${n.toFixed(n < 10 ? 1 : 0)}d`;
+}
+
 export default function OutcomesPage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [summaries, setSummaries] = useState<SignalOutcomeSummary[]>([]);
   const [rows, setRows] = useState<SignalOutcome[]>([]);
+  const [accordionRows, setAccordionRows] = useState<SignalOutcome[]>([]);
   const [strategy, setStrategy] = useState<StrategyFilter>("all");
   const [result, setResult] = useState<ResultFilter>("all");
+  const [expanded, setExpanded] = useState<string | false>(false);
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -50,12 +96,14 @@ export default function OutcomesPage() {
     try {
       const strat = strategy === "all" ? null : strategy;
       const res = result === "all" ? null : result;
-      const [sum, list] = await Promise.all([
+      const [sum, list, accordionList] = await Promise.all([
         OutcomesApi.fetchSummaries(strat),
         OutcomesApi.fetchOutcomes(strat, res),
+        OutcomesApi.fetchOutcomes(null, res),
       ]);
       setSummaries(sum);
       setRows(list);
+      setAccordionRows(accordionList);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -131,8 +179,25 @@ export default function OutcomesPage() {
       timeStops,
       hitRate,
       avgR: rW > 0 ? rSum / rW : null,
+      avgDuration: avgDurationDays(accordionRows),
     };
-  }, [summaries]);
+  }, [summaries, accordionRows]);
+
+  const byStrategy = useMemo(() => {
+    const map = new Map<string, SignalOutcome[]>();
+    for (const s of summaries) {
+      const key = strategyKey(s);
+      const list = outcomesForStrategy(accordionRows, s.strategyFilter)
+        .slice()
+        .sort((a, b) => {
+          const dateCmp = b.signalDate.localeCompare(a.signalDate);
+          if (dateCmp !== 0) return dateCmp;
+          return a.appSymbol.localeCompare(b.appSymbol);
+        });
+      map.set(key, list);
+    }
+    return map;
+  }, [summaries, accordionRows]);
 
   useEffect(() => {
     setTitle("Accuracy");
@@ -165,6 +230,7 @@ export default function OutcomesPage() {
           <MenuItem value="confluence">Confluence</MenuItem>
           <MenuItem value="trade_score">Trade Score</MenuItem>
           <MenuItem value="breakout">Breakout</MenuItem>
+          <MenuItem value="options_intraday">Options Intraday</MenuItem>
         </TextField>
         <TextField
           select
@@ -212,73 +278,20 @@ export default function OutcomesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [strategy, result, loading, resolving, importing]);
 
-  const summaryColumns = useMemo(
-    () => [
-      columnFactories.createTextColumn<SignalOutcomeSummary>({
-        field: "strategyFilter",
-        headerName: "Strategy",
-        width: 140,
-        getValue: (r) => strategyLabel(r.strategyFilter),
-      }),
-      columnFactories.createNumberColumn<SignalOutcomeSummary>({
-        field: "setups",
-        headerName: "Setups",
-        width: 90,
-        getValue: (r) => r.setups,
-      }),
-      columnFactories.createNumberColumn<SignalOutcomeSummary>({
-        field: "targetHits",
-        headerName: "Target",
-        width: 90,
-        getValue: (r) => r.targetHits,
-      }),
-      columnFactories.createNumberColumn<SignalOutcomeSummary>({
-        field: "slHits",
-        headerName: "SL",
-        width: 80,
-        getValue: (r) => r.slHits,
-      }),
-      columnFactories.createNumberColumn<SignalOutcomeSummary>({
-        field: "timeStops",
-        headerName: "Time stop",
-        width: 100,
-        getValue: (r) => r.timeStops,
-      }),
-      columnFactories.createNumberColumn<SignalOutcomeSummary>({
-        field: "openCount",
-        headerName: "Open",
-        width: 80,
-        getValue: (r) => r.openCount,
-      }),
-      columnFactories.createTextColumn<SignalOutcomeSummary>({
-        field: "targetHitRatePct",
-        headerName: "Hit rate",
-        width: 100,
-        getValue: (r) => (r.targetHitRatePct != null ? `${fmt(r.targetHitRatePct)}%` : "—"),
-      }),
-      columnFactories.createTextColumn<SignalOutcomeSummary>({
-        field: "avgRMultiple",
-        headerName: "Avg R",
-        width: 90,
-        getValue: (r) => fmt(r.avgRMultiple),
-      }),
-      columnFactories.createTextColumn<SignalOutcomeSummary>({
-        field: "avgRiskReward",
-        headerName: "Avg R:R",
-        width: 90,
-        getValue: (r) => fmt(r.avgRiskReward),
-      }),
-    ],
-    [],
-  );
-
-  const detailColumns = useMemo(
+  /** Shared columns for accordion + Outcomes table (sortable + searchable via ZenTable). */
+  const outcomeColumns = useMemo(
     () => [
       columnFactories.createTextColumn<SignalOutcome>({
         field: "appSymbol",
-        headerName: "Symbol",
+        headerName: "Stock",
         width: 100,
         getValue: (r) => r.appSymbol,
+      }),
+      columnFactories.createTextColumn<SignalOutcome>({
+        field: "instrumentName",
+        headerName: "Name",
+        width: 140,
+        getValue: (r) => r.instrumentName,
       }),
       columnFactories.createTextColumn<SignalOutcome>({
         field: "strategy",
@@ -290,30 +303,66 @@ export default function OutcomesPage() {
         field: "side",
         headerName: "Side",
         width: 70,
-        getValue: (r) => r.side,
+        getValue: (r) => r.side.toUpperCase(),
       }),
       columnFactories.createTextColumn<SignalOutcome>({
         field: "signalDate",
-        headerName: "Signal date",
+        headerName: "Entry date",
         width: 110,
         getValue: (r) => r.signalDate,
+      }),
+      columnFactories.createTextColumn<SignalOutcome>({
+        field: "exitDate",
+        headerName: "Exit date",
+        width: 110,
+        getValue: (r) => r.exitDate ?? "—",
+      }),
+      columnFactories.createTextColumn<SignalOutcome>({
+        field: "durationDays",
+        headerName: "Days",
+        width: 70,
+        getValue: (r) => {
+          const d = durationDays(r.signalDate, r.exitDate);
+          return d == null ? "—" : String(d);
+        },
+      }),
+      columnFactories.createTextColumn<SignalOutcome>({
+        field: "entryPrice",
+        headerName: "Entry",
+        width: 90,
+        getValue: (r) => fmt(r.entryPrice),
+      }),
+      columnFactories.createTextColumn<SignalOutcome>({
+        field: "initialStopLoss",
+        headerName: "SL",
+        width: 90,
+        getValue: (r) => fmt(r.initialStopLoss),
+      }),
+      columnFactories.createTextColumn<SignalOutcome>({
+        field: "targetT1",
+        headerName: "T1",
+        width: 90,
+        getValue: (r) => fmt(r.targetT1),
       }),
       columnFactories.createTextColumn<SignalOutcome>({
         field: "result",
         headerName: "Result",
         width: 100,
-        getValue: (r) => r.result,
+        getValue: (r) =>
+          r.result === "target" && r.targetLevel
+            ? `Target ${r.targetLevel}`
+            : resultLabel(r.result),
       }),
       columnFactories.createTextColumn<SignalOutcome>({
-        field: "targetLevel",
-        headerName: "Level",
-        width: 70,
-        getValue: (r) => r.targetLevel ?? "—",
+        field: "exitPrice",
+        headerName: "Exit",
+        width: 90,
+        getValue: (r) => fmt(r.exitPrice),
       }),
       columnFactories.createTextColumn<SignalOutcome>({
         field: "rMultiple",
         headerName: "R",
-        width: 80,
+        width: 70,
         getValue: (r) => fmt(r.rMultiple),
       }),
       columnFactories.createTextColumn<SignalOutcome>({
@@ -321,12 +370,6 @@ export default function OutcomesPage() {
         headerName: "P&L %",
         width: 80,
         getValue: (r) => fmt(r.pnlPct),
-      }),
-      columnFactories.createTextColumn<SignalOutcome>({
-        field: "exitDate",
-        headerName: "Exit",
-        width: 110,
-        getValue: (r) => r.exitDate ?? "—",
       }),
     ],
     [],
@@ -344,7 +387,8 @@ export default function OutcomesPage() {
         How this works: Accuracy tracks setups you already have. 1) Run Signals / Liquidity /
         Breakout / Trade Score (or click Import live setups). 2) Rows appear as open. 3) Click
         Resolve open (or wait for Worker) to mark target / SL / time-stop from future bars. Hit
-        rate = target ÷ (target + SL).
+        rate = target ÷ (target + SL). Expand a strategy to sort/filter stocks; Days = exit date −
+        entry date.
       </Alert>
       {totals.setups === 0 && !loading && (
         <Alert severity="warning">
@@ -374,16 +418,86 @@ export default function OutcomesPage() {
         <Typography variant="body2">
           Avg R: <b>{fmt(totals.avgR)}</b>
         </Typography>
+        <Typography variant="body2">
+          Avg duration: <b>{fmtDays(totals.avgDuration)}</b>
+        </Typography>
       </Stack>
+
       <Typography variant="subtitle1">By strategy</Typography>
-      <ZenTable
-        rows={summaries}
-        columns={summaryColumns}
-        loading={loading}
-        getRowId={(r) => r.strategyFilter ?? "all"}
-      />
+      {loading && summaries.length === 0 ? (
+        <Typography color="text.secondary">Loading…</Typography>
+      ) : summaries.length === 0 ? (
+        <Typography color="text.secondary">No strategy summaries yet.</Typography>
+      ) : (
+        <Stack spacing={1}>
+          {summaries.map((s) => {
+            const key = strategyKey(s);
+            const stocks = byStrategy.get(key) ?? [];
+            const avgDur = avgDurationDays(stocks);
+            return (
+              <Accordion
+                key={key}
+                disableGutters
+                expanded={expanded === key}
+                onChange={(_, isExpanded) => setExpanded(isExpanded ? key : false)}
+                sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1 }}
+              >
+                <AccordionSummary expandIcon={<CaretDown size={DEFAULT_SMALL_ICON_SIZE} />}>
+                  <Stack
+                    direction={{ xs: "column", md: "row" }}
+                    spacing={1.5}
+                    alignItems={{ md: "center" }}
+                    justifyContent="space-between"
+                    width="100%"
+                    pr={1}
+                  >
+                    <Typography fontWeight={700} minWidth={140}>
+                      {strategyLabel(s.strategyFilter)}
+                    </Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      <Chip size="small" label={`${s.setups} setups`} />
+                      <Chip size="small" color="success" variant="outlined" label={`Target ${s.targetHits}`} />
+                      <Chip size="small" color="error" variant="outlined" label={`SL ${s.slHits}`} />
+                      <Chip size="small" color="warning" variant="outlined" label={`Time ${s.timeStops}`} />
+                      <Chip size="small" color="info" variant="outlined" label={`Open ${s.openCount}`} />
+                      <Chip
+                        size="small"
+                        label={`Hit ${s.targetHitRatePct != null ? `${fmt(s.targetHitRatePct)}%` : "—"}`}
+                      />
+                      <Chip size="small" label={`Avg R ${fmt(s.avgRMultiple)}`} />
+                      <Chip size="small" label={`Avg R:R ${fmt(s.avgRiskReward)}`} />
+                      <Chip size="small" label={`Avg days ${fmtDays(avgDur)}`} />
+                    </Stack>
+                  </Stack>
+                </AccordionSummary>
+                <AccordionDetails sx={{ pt: 0 }}>
+                  <ZenTable
+                    rows={stocks}
+                    columns={outcomeColumns}
+                    loading={loading}
+                    getRowId={(r) => r.id}
+                    enableSearch
+                    searchPlaceholder="Filter stocks…"
+                    dense
+                    defaultPageSize={25}
+                    emptyMessage="No stock rows for this strategy with the current result filter."
+                  />
+                </AccordionDetails>
+              </Accordion>
+            );
+          })}
+        </Stack>
+      )}
+
       <Typography variant="subtitle1">Outcomes</Typography>
-      <ZenTable rows={rows} columns={detailColumns} loading={loading} getRowId={(r) => r.id} />
+      <ZenTable
+        rows={rows}
+        columns={outcomeColumns}
+        loading={loading}
+        getRowId={(r) => r.id}
+        enableSearch
+        searchPlaceholder="Filter outcomes…"
+      />
     </Stack>
   );
 }
