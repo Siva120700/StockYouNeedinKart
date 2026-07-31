@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using StockYouNeed.Application.Analyze;
 using StockYouNeed.Application.OptionsIntraday;
 using StockYouNeed.Application.Outcomes;
 using StockYouNeed.Application.Services;
@@ -21,6 +22,7 @@ public static class DependencyInjection
         services.AddScoped<Application.Confluence.ConfluenceService>();
         services.AddScoped<Application.Breakout.BreakoutAnalysisService>();
         services.AddScoped<TradeConfidenceService>();
+        services.AddScoped<AnalyzeStockService>();
         services.AddScoped<BacktestService>();
         services.AddScoped<UniverseSeedService>();
         return services;

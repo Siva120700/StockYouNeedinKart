@@ -29,6 +29,19 @@ public sealed class InstrumentRepository : IInstrumentRepository
         return rows.ToList();
     }
 
+    public async Task<Instrument?> GetEquityByIdAsync(Guid instrumentId, CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT i.id AS Id, i.kind AS Kind, i.symbol AS Symbol, i.name AS Name,
+                   i.exchange AS Exchange, i.is_active AS IsActive
+            FROM instruments i
+            WHERE i.id = @instrumentId AND i.kind = 'equity' AND i.is_active
+            """;
+        using var conn = _db.CreateConnection();
+        return await conn.QuerySingleOrDefaultAsync<Instrument>(
+            new CommandDefinition(sql, new { instrumentId }, cancellationToken: ct));
+    }
+
     public async Task<IReadOnlyList<AngelTokenRow>> GetActiveTokensForUniversesAsync(CancellationToken ct = default)
     {
         const string sql = """

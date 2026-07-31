@@ -226,6 +226,159 @@ public sealed class LiquidityAnalysisService
         }
     }
 
+    /// <summary>
+    /// Live single-stock liquidity: sync 1H bars for this token, build zones, evaluate fresh + classic.
+    /// Does not insert into liquidity_signals (ephemeral for Analyze Stock).
+    /// </summary>
+    public async Task<LiquidityInstrumentEval> EvaluateForInstrumentAsync(
+        Guid userId,
+        Guid instrumentId,
+        CancellationToken ct = default)
+    {
+        var token = (await _instruments.GetActiveTokensForUniversesAsync(ct))
+            .FirstOrDefault(t => t.InstrumentId == instrumentId);
+        if (token is null)
+        {
+            return new LiquidityInstrumentEval
+            {
+                Status = "no_token",
+                Detail = "No Angel token mapped for this equity.",
+            };
+        }
+
+        var barsUpserted = 0;
+        try
+        {
+            if (_options.Enabled)
+                barsUpserted = await _intradaySync.SyncInstrumentHourlyAsync(token, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Single-stock 1H sync failed for {Symbol}", token.AppSymbol);
+        }
+
+        var bars1h = (await _market.GetIntradayBarsForInstrumentAsync(
+            instrumentId, IntradayBarsSyncService.Interval1h, 120, ct)).ToList();
+        if (bars1h.Count < Min1hBars)
+        {
+            return new LiquidityInstrumentEval
+            {
+                Status = "few_bars",
+                Detail =
+                    $"Need ≥{Min1hBars} hourly bars (have {bars1h.Count}). Sync may still be catching up.",
+                BarsUpserted = barsUpserted,
+            };
+        }
+
+        var bars4h = Aggregate4h(bars1h);
+        if (bars4h.Count < Min4hBars)
+        {
+            return new LiquidityInstrumentEval
+            {
+                Status = "few_bars",
+                Detail =
+                    $"Need ≥{Min4hBars} 4H bars after aggregation (have {bars4h.Count}).",
+                BarsUpserted = barsUpserted,
+            };
+        }
+
+        var daily = (await _market.GetBarsForInstrumentAsync(instrumentId, 10, ct))
+            .OrderByDescending(b => b.TradeDate)
+            .ToList();
+        var ltp = (await _market.GetAllLtpAsync(ct))
+            .FirstOrDefault(x => x.InstrumentId == instrumentId)?.Ltp;
+        var mark = ltp is > 0 ? ltp.Value : bars1h[0].Close;
+        var asOf = DateOnly.FromDateTime(
+            DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
+        var runId = Guid.Empty;
+
+        var zonesInternal = BuildZones(bars4h, daily, mark);
+        var zoneLevels = zonesInternal
+            .OrderByDescending(z => z.Price)
+            .Select(z => new LiquidityZoneLevel
+            {
+                Type = z.Type,
+                Price = RoundPrice(z.Price),
+                Kind = z.IsSupportLike && z.IsResistanceLike
+                    ? "both"
+                    : z.IsSupportLike
+                        ? "support"
+                        : "resistance",
+            })
+            .GroupBy(z => (z.Type, z.Price))
+            .Select(g => g.First())
+            .Take(20)
+            .ToList();
+
+        var fresh = TryEvaluate(
+            userId, runId, asOf, token, bars1h, bars4h, daily,
+            ltp is > 0 ? ltp : null, "fresh");
+        var classic = TryEvaluate(
+            userId, runId, asOf, token, bars1h, bars4h, daily,
+            ltp is > 0 ? ltp : null, "classic");
+
+        await ApplySectorConfirmAsync(fresh, instrumentId, ct);
+        await ApplySectorConfirmAsync(classic, instrumentId, ct);
+
+        var sweep = Detect4hSweep(bars4h, daily, maxBars: 4);
+        var nearest = NearestZone(mark, zonesInternal);
+        var eval = new LiquidityInstrumentEval
+        {
+            Fresh = fresh,
+            Classic = classic,
+            Zones = zoneLevels,
+            BarsUpserted = barsUpserted,
+            SweepSide = fresh?.SweepSide ?? classic?.SweepSide ?? sweep?.Side,
+            SweptZoneType = fresh?.SweptZoneType ?? classic?.SweptZoneType ?? sweep?.ZoneType,
+            SweptZonePrice = fresh?.SweptZonePrice ?? classic?.SweptZonePrice
+                ?? (sweep is null ? null : RoundPrice(sweep.ZonePrice)),
+            NearestZoneType = fresh?.NearestZoneType ?? classic?.NearestZoneType ?? nearest?.Type,
+            NearestZonePrice = fresh?.NearestZonePrice ?? classic?.NearestZonePrice
+                ?? (nearest is null ? null : RoundPrice(nearest.Price)),
+            DistancePct = fresh?.DistancePct ?? classic?.DistancePct
+                ?? (nearest is null || mark == 0
+                    ? null
+                    : Math.Round(Math.Abs(mark - nearest.Price) / mark, 6)),
+        };
+
+        if (fresh is not null || classic is not null)
+        {
+            eval.Status = "evaluated";
+            return eval;
+        }
+
+        eval.Status = "no_setup";
+        eval.Detail = sweep is null
+            ? "Zones computed; no 4H sweep + 1H confirm setup right now."
+            : $"Recent {sweep.Side} sweep of {sweep.ZoneType} @ {RoundPrice(sweep.ZonePrice)} — waiting 1H confirm / RVOL / strong close.";
+        if (nearest is not null && mark > 0)
+        {
+            var dist = Math.Round(Math.Abs(mark - nearest.Price) / mark * 100m, 2);
+            eval.Detail += $" Nearest {nearest.Type} @ {RoundPrice(nearest.Price)} ({dist}% away).";
+        }
+
+        return eval;
+    }
+
+    private async Task ApplySectorConfirmAsync(
+        LiquiditySignalRow? signal, Guid instrumentId, CancellationToken ct)
+    {
+        if (signal is null)
+            return;
+        var sectorId = await _instruments.GetSectorIdForInstrumentAsync(instrumentId, ct);
+        if (sectorId is null)
+        {
+            signal.SectorConfirmed = false;
+            return;
+        }
+
+        var sectorBars = (await _market.GetBarsForInstrumentAsync(sectorId.Value, 10, ct))
+            .OrderByDescending(b => b.TradeDate)
+            .ToList();
+        signal.SectorConfirmed = sectorBars.Count >= 3
+            && CheckSectorConfirmation(signal.Side, sectorBars);
+    }
+
     /// <summary>Public for historical backtest replay — classic or fresh ruleset.</summary>
     public static LiquiditySignalRow? TryEvaluate(
         Guid userId,

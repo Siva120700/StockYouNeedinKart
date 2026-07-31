@@ -445,3 +445,107 @@ public sealed class OptionsIntradayRecommendationRow
     public Guid? LiquiditySignalId { get; set; }
     public Guid? AnalysisSignalId { get; set; }
 }
+
+/// <summary>Single-stock deep dive composed from existing engines.</summary>
+public sealed class AnalyzeStockResult
+{
+    public Guid InstrumentId { get; set; }
+    public string Symbol { get; set; } = "";
+    public string Name { get; set; } = "";
+    public decimal? SpotLtp { get; set; }
+    public DateTimeOffset? LtpFetchedAt { get; set; }
+
+    public Guid? SectorInstrumentId { get; set; }
+    public string? SectorSymbol { get; set; }
+    public string? SectorName { get; set; }
+    public bool? SectorConfirmed { get; set; }
+
+    public string Verdict { get; set; } = "neutral";
+    public string VerdictLabel { get; set; } = "No clear setup";
+    public string[] VerdictReasons { get; set; } = Array.Empty<string>();
+
+    public AnalyzeStockSetup? PrimarySetup { get; set; }
+    public AnalyzeStockLevels Levels { get; set; } = new();
+
+    public AnalysisSignalRow? Signal { get; set; }
+    public LiquiditySignalRow? LiquidityFresh { get; set; }
+    public LiquiditySignalRow? LiquidityClassic { get; set; }
+    public ConfluenceSignalRow? Confluence { get; set; }
+    public TradeConfidenceScoreRow? TradeScore { get; set; }
+    public BreakoutConfirmationRow? Breakout { get; set; }
+    public OptionsIntradayRecommendationRow? OptionsIntraday { get; set; }
+
+    public BacktestSymbolSummary? BacktestSummary { get; set; }
+    public IReadOnlyList<MarketBarRow> RecentBars { get; set; } = Array.Empty<MarketBarRow>();
+}
+
+public sealed class AnalyzeStockSetup
+{
+    public string Source { get; set; } = "";
+    public string Side { get; set; } = "";
+    public DateOnly AsOfDate { get; set; }
+    public decimal Entry { get; set; }
+    public decimal StopLoss { get; set; }
+    public decimal? TargetT1 { get; set; }
+    public decimal? TargetT2 { get; set; }
+    public decimal? TargetT3 { get; set; }
+    public decimal? PlannedRiskReward { get; set; }
+}
+
+public sealed class AnalyzeStockLevels
+{
+    public decimal? Pivot { get; set; }
+    public decimal? Resistance1 { get; set; }
+    public decimal? Resistance2 { get; set; }
+    public decimal? Resistance3 { get; set; }
+    public decimal? Support1 { get; set; }
+    public decimal? Support2 { get; set; }
+    public decimal? Support3 { get; set; }
+    public decimal? PriorDayHigh { get; set; }
+    public decimal? PriorDayLow { get; set; }
+    public decimal? Ma2d { get; set; }
+    public decimal? Ma3d { get; set; }
+    public decimal? Ma5d { get; set; }
+    public decimal? Last2dHigh { get; set; }
+    public decimal? Last2dLow { get; set; }
+    public string? SweptZoneType { get; set; }
+    public decimal? SweptZonePrice { get; set; }
+    public string? SweepSide { get; set; }
+    public string? NearestZoneType { get; set; }
+    public decimal? NearestZonePrice { get; set; }
+    public decimal? DistancePct { get; set; }
+    public string[] ZoneTags { get; set; } = Array.Empty<string>();
+    public string? LiquidityContext { get; set; }
+    /// <summary>Live liquidity eval status: evaluated | few_bars | no_token | angel_disabled | error.</summary>
+    public string? LiquidityEvalStatus { get; set; }
+    public string? LiquidityEvalDetail { get; set; }
+    public bool LiquidityLive { get; set; }
+    public IReadOnlyList<LiquidityZoneLevel> LiquidityZones { get; set; } = Array.Empty<LiquidityZoneLevel>();
+    public decimal? BreakoutLevel { get; set; }
+    public string? BreakoutPattern { get; set; }
+}
+
+/// <summary>One liquidity structure zone (PDH/PDL, swing, equal, round, …).</summary>
+public sealed class LiquidityZoneLevel
+{
+    public string Type { get; set; } = "";
+    public decimal Price { get; set; }
+    public string Kind { get; set; } = ""; // support | resistance | both
+}
+
+/// <summary>Live per-stock liquidity evaluation (Analyze Stock).</summary>
+public sealed class LiquidityInstrumentEval
+{
+    public LiquiditySignalRow? Fresh { get; set; }
+    public LiquiditySignalRow? Classic { get; set; }
+    public IReadOnlyList<LiquidityZoneLevel> Zones { get; set; } = Array.Empty<LiquidityZoneLevel>();
+    public string Status { get; set; } = "evaluated";
+    public string? Detail { get; set; }
+    public int BarsUpserted { get; set; }
+    public string? SweepSide { get; set; }
+    public string? SweptZoneType { get; set; }
+    public decimal? SweptZonePrice { get; set; }
+    public string? NearestZoneType { get; set; }
+    public decimal? NearestZonePrice { get; set; }
+    public decimal? DistancePct { get; set; }
+}

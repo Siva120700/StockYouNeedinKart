@@ -2,16 +2,17 @@ import { CssBaseline, ThemeProvider, createTheme } from "@mui/material";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import ZenPrimaryLayout from "./zen_components/layout/ZenPrimaryLayout";
 import { ZenPrimaryLayoutProvider } from "./zen_components/layout/ZenPrimaryLayoutProvider";
-import LtpPage from "./pages/LtpPage";
-import SignalsPage from "./pages/SignalsPage";
-import LiquiditySignalsPage from "./pages/LiquiditySignalsPage";
-import TradeScorePage from "./modules/trade-score/TradeScorePage";
-import ConfluencePage from "./modules/confluence/ConfluencePage";
+import AnalyzeStockPage from "./modules/analyze-stock/AnalyzeStockPage";
 import BreakoutPage from "./modules/breakout/BreakoutPage";
-import OutcomesPage from "./modules/outcomes/OutcomesPage";
+import ConfluencePage from "./modules/confluence/ConfluencePage";
 import OptionsIntradayPage from "./modules/options-intraday/OptionsIntradayPage";
+import OutcomesPage from "./modules/outcomes/OutcomesPage";
+import TradeScorePage from "./modules/trade-score/TradeScorePage";
 import BacktestPage from "./pages/BacktestPage";
+import LiquiditySignalsPage from "./pages/LiquiditySignalsPage";
+import LtpPage from "./pages/LtpPage";
 import PositionsPage from "./pages/PositionsPage";
+import SignalsPage from "./pages/SignalsPage";
 
 const theme = createTheme({
   palette: {
@@ -36,6 +37,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Navigate to="/ltp" replace />} />
               <Route path="/ltp" element={<LtpPage />} />
+              <Route path="/analyze" element={<AnalyzeStockPage />} />
               <Route path="/signals" element={<SignalsPage />} />
               <Route path="/liquidity" element={<LiquiditySignalsPage ruleset="classic" />} />
               <Route path="/liquidity-fresh" element={<LiquiditySignalsPage ruleset="fresh" />} />

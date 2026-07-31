@@ -13,6 +13,7 @@ import {
   ChartLine,
   Drop,
   ListChecks,
+  MagnifyingGlass,
   Notebook,
   Pulse,
   SidebarSimple,
@@ -22,6 +23,7 @@ import { DEFAULT_ICON_SIZE } from "../../constants";
 
 const navItems = [
   { to: "/ltp", label: "Live LTP", icon: Pulse },
+  { to: "/analyze", label: "Analyze Stock", icon: MagnifyingGlass },
   { to: "/signals", label: "Signals", icon: ChartLine },
   { to: "/liquidity", label: "Liquidity", icon: Drop },
   { to: "/liquidity-fresh", label: "Liquidity Fresh", icon: Drop },

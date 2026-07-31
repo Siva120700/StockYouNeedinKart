@@ -43,6 +43,144 @@ public sealed class TradeConfidenceService
         Guid userId, Guid? runId, CancellationToken ct = default)
         => await _tradeScore.GetScoresAsync(userId, runId, ct);
 
+    /// <summary>
+    /// Calculate Trade Score for one stock using current daily bars and the live
+    /// per-stock liquidity result. This is ephemeral and does not create a run.
+    /// </summary>
+    public async Task<(TradeConfidenceScoreRow Score, AnalysisSignalRow? Signal)>
+        EvaluateForInstrumentAsync(
+            Guid userId,
+            Instrument instrument,
+            LiquiditySignalRow? liveLiquidity,
+            CancellationToken ct = default)
+    {
+        var bars = (await _market.GetBarsForInstrumentAsync(instrument.Id, 60, ct))
+            .OrderByDescending(b => b.TradeDate)
+            .ToList();
+        var ltp = (await _market.GetAllLtpAsync(ct))
+            .FirstOrDefault(x => x.InstrumentId == instrument.Id)?.Ltp;
+        var asOf = DateOnly.FromDateTime(
+            DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
+
+        AnalysisSignalRow? signal = null;
+        if (bars.Count >= 5)
+        {
+            signal = BreakoutSignalEvaluator.Evaluate(
+                userId, Guid.Empty, asOf, bars, ltp is > 0 ? ltp : null);
+            if (signal is not null)
+                signal.InstrumentName = instrument.Name;
+        }
+
+        var breakout = bars.Count >= 21
+            ? BreakoutConfirmationEvaluator.Evaluate(bars)
+            : null;
+        var liquiditySideAligned = signal is not null
+            && liveLiquidity is not null
+            && string.Equals(
+                liveLiquidity.Side, signal.Side, StringComparison.OrdinalIgnoreCase);
+        var liquidityDateAligned = liquiditySideAligned
+            && TradeScoreLevelComposer.DatesAlign(
+                liveLiquidity!.AsOfDate, signal!.AsOfDate);
+        var liquidityPriceAligned = liquidityDateAligned
+            && TradeScoreLevelComposer.PricesAlign(
+                signal!.EntryPrice, liveLiquidity!.EntryPrice, signal.EntryPrice);
+        var liquidityAligned = liquidityPriceAligned;
+        var breakoutConfirmed = signal is not null
+            && breakout is { Confirmed: true }
+            && string.Equals(
+                breakout.Side, signal.Side, StringComparison.OrdinalIgnoreCase);
+
+        var breakdown = TradeConfidenceScorer.Score(
+            signal is not null, liquidityAligned, breakoutConfirmed);
+        var reasons = new List<string>();
+        var breakoutLabel = breakout is null
+            ? null
+            : BreakoutConfirmationEvaluator.PatternLabel(breakout.PatternType);
+        if (breakout is not null && breakoutLabel == "—")
+            breakoutLabel = breakout.PatternType.Replace('_', ' ');
+
+        if (signal is null)
+            reasons.Add("Daily signal absent (+0/20)");
+        else
+            reasons.Add("Daily signal present (+20/20)");
+
+        if (liveLiquidity is null)
+            reasons.Add("Liquidity Fresh setup absent (+0/20)");
+        else if (!liquiditySideAligned)
+            reasons.Add("Liquidity side conflicts with daily signal (+0/20)");
+        else if (!liquidityDateAligned)
+            reasons.Add("Liquidity setup is not date-aligned (+0/20)");
+        else if (!liquidityPriceAligned)
+            reasons.Add("Liquidity entry differs by more than 0.2% (+0/20)");
+        else
+            reasons.Add("Liquidity Fresh side/date/entry aligned (+20/20)");
+
+        if (breakout is null)
+            reasons.Add("No recognized breakout pattern (+0/30)");
+        else if (!breakout.Confirmed)
+            reasons.Add($"{breakoutLabel} not confirmed (+0/30)");
+        else if (!breakoutConfirmed)
+            reasons.Add("Breakout direction conflicts with daily signal (+0/30)");
+        else
+            reasons.Add($"{breakoutLabel} confirmed (+30/30)");
+
+        reasons.Add("Futures layer not evaluated (excluded from scale)");
+        reasons.Add("Option-chain layer not evaluated (excluded from scale)");
+        reasons.Add(
+            $"Total {breakdown.RawScore}/{breakdown.AvailableWeight} available points " +
+            $"= {breakdown.TotalScore}/100 — {TradeConfidenceScorer.RatingLabel(breakdown.Rating)}");
+
+        decimal entry = 0;
+        decimal sl = 0;
+        if (signal is not null)
+        {
+            if (!TradeScoreLevelComposer.TryCompose(
+                    signal.Side, signal.EntryPrice, signal.InitialStopLoss,
+                    liquidityAligned ? liveLiquidity?.EntryPrice : null,
+                    liquidityAligned ? liveLiquidity?.InitialStopLoss : null,
+                    out entry, out sl))
+            {
+                entry = signal.EntryPrice;
+                sl = signal.InitialStopLoss;
+            }
+        }
+
+        return (new TradeConfidenceScoreRow
+        {
+            Id = Guid.NewGuid(),
+            RunId = Guid.Empty,
+            UserId = userId,
+            InstrumentId = instrument.Id,
+            AppSymbol = instrument.Symbol,
+            InstrumentName = instrument.Name,
+            Side = signal?.Side ?? "",
+            AsOfDate = asOf,
+            ConfidenceScore = breakdown.TotalScore,
+            Rating = breakdown.Rating,
+            SignalsScore = breakdown.SignalsScore,
+            LiquidityScore = breakdown.LiquidityScore,
+            BreakoutScore = breakdown.BreakoutScore,
+            FuturesScore = breakdown.FuturesScore,
+            OptionsScore = breakdown.OptionsScore,
+            Reasons = reasons.Distinct().ToArray(),
+            EntryPrice = entry,
+            InitialStopLoss = sl,
+            TargetT1 = liquidityAligned
+                ? liveLiquidity?.TargetT1 ?? signal?.TargetT1
+                : signal?.TargetT1,
+            TargetT2 = liquidityAligned
+                ? liveLiquidity?.TargetT2 ?? signal?.TargetT2
+                : signal?.TargetT2,
+            TargetT3 = liquidityAligned
+                ? liveLiquidity?.TargetT3 ?? signal?.TargetT3
+                : signal?.TargetT3,
+            AnalysisSignalId = signal?.Id,
+            LiquiditySignalId = liquidityAligned ? liveLiquidity?.Id : null,
+            BreakoutConfirmed = breakoutConfirmed,
+            BreakoutAdx = breakout?.PatternDepthPct,
+        }, signal);
+    }
+
     public async Task<TradeConfidenceRunRow> RunAsync(
         Guid userId,
         bool refreshSignals,

@@ -42,6 +42,10 @@ export function ratingLabel(rating: string): string {
       return "★★★ Watch";
     case "neutral":
       return "Neutral";
+    case "unconfirmed":
+      return "Unconfirmed — signal only";
+    case "no_setup":
+      return "No setup";
     default:
       return "Avoid";
   }

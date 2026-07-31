@@ -116,4 +116,47 @@ public sealed class IntradayBarsSyncService
             upserted, refreshed, skippedFresh);
         return upserted;
     }
+
+    /// <summary>Refresh 1H bars for one equity token (used by Analyze Stock liquidity deep-dive).</summary>
+    public async Task<int> SyncInstrumentHourlyAsync(
+        AngelTokenRow token, CancellationToken ct = default, bool force = false)
+    {
+        if (!_angelOptions.Enabled)
+            return 0;
+
+        await _angel.EnsureSessionAsync(ct);
+        var toIst = DateTime.Now;
+        var fullFromIst = toIst.Date.AddDays(-(LookbackSessions * 2 + 5));
+        var nowUtc = DateTimeOffset.UtcNow;
+
+        var latest = await _market.GetLatestIntradayBarTimeAsync(token.InstrumentId, Interval1h, ct);
+        if (!force && latest is not null && nowUtc - latest.Value <= MaxStale)
+            return 0;
+
+        var fromIst = fullFromIst;
+        if (latest is not null && !force)
+        {
+            var latestIst = latest.Value.ToOffset(TimeSpan.FromHours(5.5)).DateTime;
+            fromIst = latestIst.AddDays(-1);
+            if (fromIst < fullFromIst)
+                fromIst = fullFromIst;
+        }
+
+        var candles = await _angel.GetHourlyCandlesAsync(
+            token.Exchange, token.SymbolToken, fromIst, toIst, ct);
+        var upserted = 0;
+        foreach (var c in candles)
+        {
+            if (c.BarTime is null)
+                continue;
+            await _market.UpsertIntradayBarAsync(
+                token.InstrumentId, Interval1h, c.BarTime.Value,
+                c.Open, c.High, c.Low, c.Close, c.Volume, ct);
+            upserted++;
+        }
+
+        _logger.LogInformation(
+            "Intraday 1H sync for {Symbol}: upserted {Count} bars.", token.AppSymbol, upserted);
+        return upserted;
+    }
 }

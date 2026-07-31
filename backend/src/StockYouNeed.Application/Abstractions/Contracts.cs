@@ -95,6 +95,7 @@ public sealed class AngelOptionGreek
 public interface IInstrumentRepository
 {
     Task<IReadOnlyList<Instrument>> GetUniverseEquitiesAsync(CancellationToken ct = default);
+    Task<Instrument?> GetEquityByIdAsync(Guid instrumentId, CancellationToken ct = default);
     Task<IReadOnlyList<AngelTokenRow>> GetActiveTokensForUniversesAsync(CancellationToken ct = default);
     Task UpsertAngelTokenAsync(AngelTokenRow row, CancellationToken ct = default);
     Task EnsureDemoUserAsync(Guid userId, string email, string displayName, CancellationToken ct = default);

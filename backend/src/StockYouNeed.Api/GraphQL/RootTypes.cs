@@ -65,6 +65,22 @@ public sealed class Query
         CancellationToken ct)
         => await tradeScore.GetScoresAsync(user.UserId, runId, ct);
 
+    public async Task<AnalyzeStockResult> AnalyzeStock(
+        Guid instrumentId,
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.Analyze.AnalyzeStockService analyze,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await analyze.AnalyzeAsync(user.UserId, instrumentId, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
     public async Task<IReadOnlyList<OpenPositionRow>> OpenPositions(
         [Service] ICurrentUserAccessor user,
         [Service] IPortfolioRepository portfolio,
