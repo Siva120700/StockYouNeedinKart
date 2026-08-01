@@ -70,9 +70,11 @@ public sealed class LiquidityAnalysisService
         bool includeWatchlist,
         string triggeredBy,
         CancellationToken ct = default,
-        string ruleset = "classic")
+        string ruleset = "classic",
+        bool requireRetest = false,
+        bool requireRelativeStrength = false)
     {
-        ruleset = ruleset.Trim().ToLowerInvariant() == "fresh" ? "fresh" : "classic";
+        ruleset = NormalizeRuleset(ruleset);
         var asOf = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
         var runId = await _portfolio.CreateLiquidityAnalysisRunAsync(
             userId, triggeredBy, includeNifty50, includeNifty100, includeWatchlist, asOf, ruleset, ct);
@@ -85,7 +87,9 @@ public sealed class LiquidityAnalysisService
             ["fewIntradayBars"] = 0,
             ["noSetup"] = 0,
             ["intradayBarsUpserted"] = 0,
-            ["ruleset"] = ruleset
+            ["ruleset"] = ruleset,
+            ["requireRetest"] = requireRetest,
+            ["requireRelativeStrength"] = requireRelativeStrength
         };
 
         try
@@ -128,6 +132,14 @@ public sealed class LiquidityAnalysisService
                 "Liquidity sector evidence: {SectorIds} sectors, {WithBars} with bars.",
                 sectorIds.Count, sectorBarsCache.Count);
 
+            // Optional Nifty 50 daily bars for V2 relative-strength filter.
+            List<MarketBarRow>? niftyDaily = null;
+            if (ruleset == "v2")
+            {
+                niftyDaily = await LoadNiftyDailyBarsAsync(ct);
+                stats["niftyDailyBars"] = niftyDaily?.Count ?? 0;
+            }
+
             var tokens = await _instruments.GetActiveTokensForUniversesAsync(ct);
             var watchIds = includeWatchlist
                 ? new HashSet<Guid>(await _portfolio.GetWatchlistInstrumentIdsAsync(userId, ct))
@@ -143,6 +155,8 @@ public sealed class LiquidityAnalysisService
             var skippedFlip = 0;
             var sectorConfirmedCount = 0;
             var openOutcomes = await _outcomes.GetOpenAsync(userId, ct);
+            var dailyBarLimit = ruleset == "v2" ? 80 : 10;
+            var v2Options = new LiquidityV2Evaluator.Options(requireRetest, requireRelativeStrength);
 
             foreach (var token in tokens)
             {
@@ -165,13 +179,40 @@ public sealed class LiquidityAnalysisService
                     continue;
                 }
 
-                var daily = await _market.GetBarsForInstrumentAsync(token.InstrumentId, 10, ct);
+                var daily = (await _market.GetBarsForInstrumentAsync(token.InstrumentId, dailyBarLimit, ct))
+                    .OrderByDescending(b => b.TradeDate)
+                    .ToList();
                 ltpById.TryGetValue(token.InstrumentId, out var ltp);
 
-                var signal = TryEvaluate(
-                    userId, runId, asOf, token, bars1h, bars4h, daily.ToList(),
-                    ltp > 0 ? ltp : null,
-                    ruleset);
+                var sectorId = await _instruments.GetSectorIdForInstrumentAsync(token.InstrumentId, ct);
+
+                LiquiditySignalRow? signal;
+                if (ruleset == "v2")
+                {
+                    signal = LiquidityV2Evaluator.TryEvaluate(
+                        userId, runId, asOf, token, bars1h, bars4h, daily,
+                        ltp > 0 ? ltp : null,
+                        sectorConfirmed: false,
+                        niftyDaily,
+                        v2Options);
+
+                    if (signal is not null)
+                    {
+                        if (sectorId is not null && sectorBarsCache.TryGetValue(sectorId.Value, out var sBarsForSide))
+                            signal.SectorConfirmed = CheckSectorConfirmation(signal.Side, sBarsForSide);
+                        else
+                            signal.SectorConfirmed = false;
+
+                        RescoreV2Sector(signal);
+                    }
+                }
+                else
+                {
+                    signal = TryEvaluate(
+                        userId, runId, asOf, token, bars1h, bars4h, daily,
+                        ltp > 0 ? ltp : null,
+                        ruleset);
+                }
 
                 if (signal is null)
                 {
@@ -189,14 +230,12 @@ public sealed class LiquidityAnalysisService
                     continue;
                 }
 
-                var sectorId = await _instruments.GetSectorIdForInstrumentAsync(token.InstrumentId, ct);
-                if (sectorId is not null && sectorBarsCache.TryGetValue(sectorId.Value, out var sectorBars))
+                if (ruleset != "v2")
                 {
-                    signal.SectorConfirmed = CheckSectorConfirmation(signal.Side, sectorBars);
-                }
-                else
-                {
-                    signal.SectorConfirmed = false;
+                    if (sectorId is not null && sectorBarsCache.TryGetValue(sectorId.Value, out var sectorBars2))
+                        signal.SectorConfirmed = CheckSectorConfirmation(signal.Side, sectorBars2);
+                    else
+                        signal.SectorConfirmed = false;
                 }
 
                 if (signal.SectorConfirmed)
@@ -238,6 +277,61 @@ public sealed class LiquidityAnalysisService
             await _portfolio.CompleteLiquidityAnalysisRunAsync(runId, "failed", ex.Message, stats, ct);
             throw;
         }
+    }
+
+    private static string NormalizeRuleset(string? ruleset)
+    {
+        var s = (ruleset ?? "classic").Trim().ToLowerInvariant();
+        return s switch
+        {
+            "fresh" => "fresh",
+            "v2" => "v2",
+            _ => "classic"
+        };
+    }
+
+    private async Task<List<MarketBarRow>?> LoadNiftyDailyBarsAsync(CancellationToken ct)
+    {
+        foreach (var symbol in new[] { "NIFTY", "NIFTY 50", "NIFTY50" })
+        {
+            var inst = await _instruments.FindBySymbolAsync(symbol, ct);
+            if (inst is null) continue;
+            var bars = (await _market.GetBarsForInstrumentAsync(inst.Id, 80, ct))
+                .OrderByDescending(b => b.TradeDate)
+                .ToList();
+            if (bars.Count >= 2)
+                return bars;
+        }
+
+        _logger.LogInformation(
+            "Liquidity V2: no Nifty daily bars found (symbols NIFTY/NIFTY50). Relative-strength filter will reject when enabled.");
+        return null;
+    }
+
+    /// <summary>
+    /// After sector confirmation is known, adjust V2 quality score so sector +10 is accurate.
+    /// </summary>
+    private static void RescoreV2Sector(LiquiditySignalRow signal)
+    {
+        var reasons = signal.ScoreReasons?.ToList() ?? new List<string>();
+        var hasSector = reasons.Any(r => r.Contains("sector", StringComparison.OrdinalIgnoreCase));
+        if (signal.SectorConfirmed && !hasSector)
+        {
+            signal.QualityScore += 10;
+            reasons.Add("sector +10");
+        }
+        else if (!signal.SectorConfirmed && hasSector)
+        {
+            signal.QualityScore = Math.Max(0, signal.QualityScore - 10);
+            reasons.RemoveAll(r => r.Contains("sector", StringComparison.OrdinalIgnoreCase));
+        }
+
+        signal.ScoreReasons = reasons.ToArray();
+        signal.ConfidenceRating = signal.QualityScore >= 92 ? "A+"
+            : signal.QualityScore >= 84 ? "A"
+            : signal.QualityScore >= 72 ? "B"
+            : signal.QualityScore >= 58 ? "C"
+            : "D";
     }
 
     /// <summary>
@@ -608,7 +702,7 @@ public sealed class LiquidityAnalysisService
             : latest.Low < last2Low;
     }
 
-    private static (decimal rvol, double percentile, bool ok) ComputeRvol(
+    internal static (decimal rvol, double percentile, bool ok) ComputeRvol(
         List<MarketIntradayBarRow> barsNewestFirst, int barIndex = 0)
     {
         if (barsNewestFirst.Count < barIndex + RvolLookback + 5)
@@ -656,11 +750,11 @@ public sealed class LiquidityAnalysisService
             : pos <= (1m - StrongClosePct);
     }
 
-    private sealed record SweepResult(
+    internal sealed record SweepResult(
         string Side, string ZoneType, decimal ZonePrice,
         decimal CandleHigh, decimal CandleLow, DateTimeOffset BarTime);
 
-    private static SweepResult? Detect4hSweep(
+    internal static SweepResult? Detect4hSweep(
         List<Ohlcv> bars4h, List<MarketBarRow> daily, int maxBars = 4)
     {
         SweepResult? best = null;
@@ -694,7 +788,7 @@ public sealed class LiquidityAnalysisService
         return best;
     }
 
-    private static SweepResult Prefer(SweepResult? current, SweepResult candidate)
+    internal static SweepResult Prefer(SweepResult? current, SweepResult candidate)
     {
         if (current is null)
             return candidate;
@@ -708,7 +802,7 @@ public sealed class LiquidityAnalysisService
         return candidate.BarTime >= current.BarTime ? candidate : current;
     }
 
-    private static int ZonePriority(string type) => type switch
+    internal static int ZonePriority(string type) => type switch
     {
         "equal_low" or "equal_high" => 0,
         "swing_low" or "swing_high" => 1,
@@ -718,9 +812,9 @@ public sealed class LiquidityAnalysisService
         _ => 5
     };
 
-    private sealed record Zone(string Type, decimal Price, int Priority, bool IsSupportLike, bool IsResistanceLike);
+    internal sealed record Zone(string Type, decimal Price, int Priority, bool IsSupportLike, bool IsResistanceLike);
 
-    private static List<Zone> BuildZones(List<Ohlcv> bars4hNewestFirst, List<MarketBarRow> dailyNewestFirst, decimal refPrice)
+    internal static List<Zone> BuildZones(List<Ohlcv> bars4hNewestFirst, List<MarketBarRow> dailyNewestFirst, decimal refPrice)
     {
         var zones = new List<Zone>();
 
@@ -801,7 +895,7 @@ public sealed class LiquidityAnalysisService
         return (highs, lows);
     }
 
-    private static List<decimal> PickStructureTargets(string side, decimal entry, decimal sl, List<Zone> zones)
+    internal static List<decimal> PickStructureTargets(string side, decimal entry, decimal sl, List<Zone> zones)
     {
         IEnumerable<decimal> candidates;
         if (side == SignalSides.Buy)
@@ -845,7 +939,7 @@ public sealed class LiquidityAnalysisService
         return list;
     }
 
-    private static Zone? NearestZone(decimal price, List<Zone> zones)
+    internal static Zone? NearestZone(decimal price, List<Zone> zones)
     {
         if (zones.Count == 0 || price <= 0)
             return null;
@@ -883,7 +977,7 @@ public sealed class LiquidityAnalysisService
         return result.OrderByDescending(b => b.BarTime).ToList();
     }
 
-    private static decimal RoundPrice(decimal price) =>
+    internal static decimal RoundPrice(decimal price) =>
         Math.Round(price, 2, MidpointRounding.AwayFromZero);
 
     public readonly record struct Ohlcv(

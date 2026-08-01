@@ -61,7 +61,13 @@ public sealed class SignalOutcomeService
 
     public Task OpenFromLiquidityAsync(LiquiditySignalRow signal, string ruleset, CancellationToken ct = default)
     {
-        var strategy = ruleset.Trim().ToLowerInvariant() == "fresh" ? "liquidity_fresh" : "liquidity";
+        var r = ruleset.Trim().ToLowerInvariant();
+        var strategy = r switch
+        {
+            "fresh" => "liquidity_fresh",
+            "v2" => "liquidity_v2",
+            _ => "liquidity"
+        };
         return OpenAsync(new SignalOutcomeRow
         {
             Id = Guid.NewGuid(),

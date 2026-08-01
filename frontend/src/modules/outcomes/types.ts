@@ -42,6 +42,8 @@ export function strategyLabel(strategy: string | null | undefined): string {
       return "Liquidity";
     case "liquidity_fresh":
       return "Liquidity Fresh";
+    case "liquidity_v2":
+      return "Liquidity V2";
     case "confluence":
       return "Confluence";
     case "trade_score":

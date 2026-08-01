@@ -111,6 +111,8 @@ public interface IInstrumentRepository
     Task<IReadOnlyList<Guid>> GetSectorInstrumentIdsAsync(CancellationToken ct = default);
     Task<Guid?> GetSectorIdForInstrumentAsync(Guid instrumentId, CancellationToken ct = default);
     Task<IReadOnlyList<AngelTokenRow>> GetActiveTokensForSectorsAsync(CancellationToken ct = default);
+    /// <summary>Lookup any active instrument by NSE symbol (equity, sector_index, or index).</summary>
+    Task<Instrument?> FindBySymbolAsync(string symbol, CancellationToken ct = default);
 }
 
 public interface IMarketDataRepository

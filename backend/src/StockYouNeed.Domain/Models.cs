@@ -143,6 +143,11 @@ public sealed class LiquiditySignalRow
     public decimal? DistancePct { get; set; }
     public string[] ZoneTags { get; set; } = Array.Empty<string>();
     public string TimeframeContext { get; set; } = "4h_sweep+1h_confirm";
+    public int QualityScore { get; set; }
+    public string ConfidenceRating { get; set; } = "";
+    public string? SweepStrength { get; set; }
+    public decimal? Atr14 { get; set; }
+    public string[] ScoreReasons { get; set; } = Array.Empty<string>();
 }
 
 /// <summary>Signals + Liquidity Fresh overlap (Confluence menu).</summary>

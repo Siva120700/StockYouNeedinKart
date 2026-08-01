@@ -236,4 +236,25 @@ public sealed class InstrumentRepository : IInstrumentRepository
         var rows = await conn.QueryAsync<AngelTokenRow>(new CommandDefinition(sql, cancellationToken: ct));
         return rows.ToList();
     }
+
+    public async Task<Instrument?> FindBySymbolAsync(string symbol, CancellationToken ct = default)
+    {
+        const string sql = """
+            SELECT id AS Id, kind AS Kind, symbol AS Symbol, name AS Name,
+                   exchange AS Exchange, is_active AS IsActive
+            FROM instruments
+            WHERE is_active
+              AND exchange = 'NSE'
+              AND upper(symbol) = upper(@symbol)
+            ORDER BY CASE kind
+              WHEN 'index' THEN 0
+              WHEN 'sector_index' THEN 1
+              ELSE 2
+            END
+            LIMIT 1
+            """;
+        using var conn = _db.CreateConnection();
+        return await conn.QuerySingleOrDefaultAsync<Instrument>(
+            new CommandDefinition(sql, new { symbol }, cancellationToken: ct));
+    }
 }

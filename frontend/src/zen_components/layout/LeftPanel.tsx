@@ -27,6 +27,7 @@ const navItems = [
   { to: "/signals", label: "Signals", icon: ChartLine },
   { to: "/liquidity", label: "Liquidity", icon: Drop },
   { to: "/liquidity-fresh", label: "Liquidity Fresh", icon: Drop },
+  { to: "/liquidity-v2", label: "Liquidity V2", icon: Drop },
   { to: "/confluence", label: "Confluence", icon: ChartLine },
   { to: "/breakout", label: "Breakout", icon: ChartLine },
   { to: "/trade-score", label: "Trade Score", icon: ChartLine },

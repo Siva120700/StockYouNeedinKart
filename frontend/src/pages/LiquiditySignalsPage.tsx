@@ -82,7 +82,7 @@ const liquidityExportBase: ExportColumn<ScoredLiquiditySignal>[] = [
   { header: "Sector", value: (r) => (r.sectorConfirmed ? "Yes" : "No") },
 ];
 
-export type LiquidityRuleset = "classic" | "fresh";
+export type LiquidityRuleset = "classic" | "fresh" | "v2";
 
 export default function LiquiditySignalsPage({
   ruleset = "classic",
@@ -97,11 +97,17 @@ export default function LiquiditySignalsPage({
   const [running, setRunning] = useState(false);
   const [sectorCheck, setSectorCheck] = useState(false);
   const [riskRewardCheck, setRiskRewardCheck] = useState(false);
+  const [requireRetest, setRequireRetest] = useState(false);
+  const [requireRelativeStrength, setRequireRelativeStrength] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const pageTitle = ruleset === "fresh" ? "Liquidity Fresh" : "Liquidity";
-  const exportBase = ruleset === "fresh" ? "liquidity-fresh" : "liquidity";
-  const strategyKey = ruleset === "fresh" ? "liquidity_fresh" : "liquidity";
+  const isV2 = ruleset === "v2";
+  const pageTitle =
+    ruleset === "fresh" ? "Liquidity Fresh" : ruleset === "v2" ? "Liquidity V2" : "Liquidity";
+  const exportBase =
+    ruleset === "fresh" ? "liquidity-fresh" : ruleset === "v2" ? "liquidity-v2" : "liquidity";
+  const strategyKey =
+    ruleset === "fresh" ? "liquidity_fresh" : ruleset === "v2" ? "liquidity_v2" : "liquidity";
 
   const liquidityExportColumns: ExportColumn<ScoredLiquiditySignal>[] = useMemo(
     () => [
@@ -111,9 +117,15 @@ export default function LiquiditySignalsPage({
         header: "Hit %",
         value: (r) => formatHitRatePct(hitRates.get(r.instrumentId)),
       },
+      ...(isV2
+        ? ([
+            { header: "Confidence", value: (r: ScoredLiquiditySignal) => r.confidenceRating ?? "" },
+            { header: "Sweep str", value: (r: ScoredLiquiditySignal) => r.sweepStrength ?? "" },
+          ] as ExportColumn<ScoredLiquiditySignal>[])
+        : []),
       ...liquidityExportBase.slice(2),
     ],
-    [hitRates],
+    [hitRates, isV2],
   );
 
   async function refresh() {
@@ -138,7 +150,12 @@ export default function LiquiditySignalsPage({
     setRunning(true);
     setError(null);
     try {
-      await ActionFactory.runLiquidityAnalysis(ruleset);
+      await ActionFactory.runLiquidityAnalysis(
+        ruleset,
+        isV2
+          ? { requireRetest, requireRelativeStrength }
+          : undefined,
+      );
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -170,9 +187,13 @@ export default function LiquiditySignalsPage({
 
   /**
    * Quality score 0–100: higher = stronger liquidity setup.
-   * Weights: RVOL percentile, RVOL size, sweep zone quality, strong close, R:R, proximity.
+   * V2 uses server-side qualityScore; classic/fresh keep client heuristic.
    */
   function liquidityScore(row: LiquiditySignal): number {
+    if (isV2 && row.qualityScore != null && Number.isFinite(Number(row.qualityScore))) {
+      return Math.round(Number(row.qualityScore));
+    }
+
     let score = 0;
 
     const pctile = Number(row.rvolPercentile);
@@ -277,6 +298,32 @@ export default function LiquiditySignalsPage({
           label="R:R ≥ 1"
           sx={{ mr: 1 }}
         />
+        {isV2 ? (
+          <>
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={requireRetest}
+                  onChange={(e) => setRequireRetest(e.target.checked)}
+                />
+              }
+              label="Require retest"
+              sx={{ mr: 1 }}
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={requireRelativeStrength}
+                  onChange={(e) => setRequireRelativeStrength(e.target.checked)}
+                />
+              }
+              label="Nifty RS"
+              sx={{ mr: 1 }}
+            />
+          </>
+        ) : null}
         <Button
           variant="outlined"
           size="small"
@@ -307,7 +354,17 @@ export default function LiquiditySignalsPage({
       </MuiStack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, loading, sectorCheck, riskRewardCheck, visibleRows, pageTitle]);
+  }, [
+    running,
+    loading,
+    sectorCheck,
+    riskRewardCheck,
+    requireRetest,
+    requireRelativeStrength,
+    visibleRows,
+    pageTitle,
+    isV2,
+  ]);
 
   const columns = useMemo(() => {
     type Scored = LiquiditySignal & { score: number };
@@ -320,6 +377,22 @@ export default function LiquiditySignalsPage({
         minDecimalPlaces: 0,
         getValue: (r) => r.score,
       }),
+      ...(isV2
+        ? [
+            columnFactories.createTextColumn<Scored>({
+              field: "confidenceRating",
+              headerName: "Conf",
+              width: 70,
+              getValue: (r) => r.confidenceRating ?? "",
+            }),
+            columnFactories.createTextColumn<Scored>({
+              field: "sweepStrength",
+              headerName: "Sweep str",
+              width: 90,
+              getValue: (r) => r.sweepStrength ?? "",
+            }),
+          ]
+        : []),
       columnFactories.createTextColumn<Scored>({
         field: "appSymbol",
         headerName: "Symbol",
@@ -414,7 +487,7 @@ export default function LiquiditySignalsPage({
         { field: "actions", headerName: "", width: 72 },
       ),
     ];
-  }, [hitRates]);
+  }, [hitRates, isV2]);
 
   return (
     <>
@@ -435,7 +508,9 @@ export default function LiquiditySignalsPage({
             ? `No ${pageTitle.toLowerCase()} signals match the active filters. Turn filters off, or Run again.`
             : ruleset === "fresh"
               ? "No liquidity fresh signals. Click Run (stricter confirm window + skip spent T1)."
-              : "No liquidity signals. Click Run liquidity (needs 1H bars + 4H sweep + 1H confirm)."
+              : ruleset === "v2"
+                ? "No liquidity V2 signals. Click Run (ATR/HTF/quality filters)."
+                : "No liquidity signals. Click Run liquidity (needs 1H bars + 4H sweep + 1H confirm)."
         }
       />
     </>

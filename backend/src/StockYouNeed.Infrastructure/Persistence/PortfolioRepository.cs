@@ -394,14 +394,16 @@ public sealed class PortfolioRepository : IPortfolioRepository
               relative_volume, rvol_percentile, rvol_ok, strong_close, sector_confirmed,
               sweep_side, swept_zone_type, swept_zone_price,
               nearest_zone_type, nearest_zone_price, distance_pct,
-              zone_tags, timeframe_context)
+              zone_tags, timeframe_context,
+              quality_score, confidence_rating, sweep_strength, atr14, score_reasons)
             VALUES (
               @Id, @LiquidityRunId, @UserId, @InstrumentId, @Side::signal_side, @AsOfDate,
               @EntryPrice, @InitialStopLoss, @TargetT1, @TargetT2, @TargetT3,
               @RelativeVolume, @RvolPercentile, @RvolOk, @StrongClose, @SectorConfirmed,
               @SweepSide, @SweptZoneType, @SweptZonePrice,
               @NearestZoneType, @NearestZonePrice, @DistancePct,
-              @ZoneTags, @TimeframeContext)
+              @ZoneTags, @TimeframeContext,
+              @QualityScore, @ConfidenceRating, @SweepStrength, @Atr14, @ScoreReasons)
             """;
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, signal.UserId);
@@ -439,7 +441,12 @@ public sealed class PortfolioRepository : IPortfolioRepository
               s.nearest_zone_price AS NearestZonePrice,
               s.distance_pct AS DistancePct,
               s.zone_tags AS ZoneTags,
-              s.timeframe_context AS TimeframeContext
+              s.timeframe_context AS TimeframeContext,
+              s.quality_score AS QualityScore,
+              s.confidence_rating AS ConfidenceRating,
+              s.sweep_strength AS SweepStrength,
+              s.atr14 AS Atr14,
+              s.score_reasons AS ScoreReasons
             FROM liquidity_signals s
             JOIN instruments i ON i.id = s.instrument_id
             WHERE s.user_id = @userId
@@ -470,7 +477,12 @@ public sealed class PortfolioRepository : IPortfolioRepository
     private static string NormalizeLiquidityRuleset(string? ruleset)
     {
         var s = (ruleset ?? "classic").Trim().ToLowerInvariant();
-        return s == "fresh" ? "fresh" : "classic";
+        return s switch
+        {
+            "fresh" => "fresh",
+            "v2" => "v2",
+            _ => "classic"
+        };
     }
 
     public async Task<LiquiditySignalRow?> GetLiquiditySignalAsync(Guid signalId, Guid userId, CancellationToken ct = default)
@@ -502,7 +514,12 @@ public sealed class PortfolioRepository : IPortfolioRepository
               s.nearest_zone_price AS NearestZonePrice,
               s.distance_pct AS DistancePct,
               s.zone_tags AS ZoneTags,
-              s.timeframe_context AS TimeframeContext
+              s.timeframe_context AS TimeframeContext,
+              s.quality_score AS QualityScore,
+              s.confidence_rating AS ConfidenceRating,
+              s.sweep_strength AS SweepStrength,
+              s.atr14 AS Atr14,
+              s.score_reasons AS ScoreReasons
             FROM liquidity_signals s
             JOIN instruments i ON i.id = s.instrument_id
             WHERE s.id = @signalId AND s.user_id = @userId

@@ -53,7 +53,7 @@ export const DataFactory = {
     return data.signals;
   },
 
-  async liquiditySignals(runId?: string, ruleset: "classic" | "fresh" = "classic"): Promise<LiquiditySignal[]> {
+  async liquiditySignals(runId?: string, ruleset: "classic" | "fresh" | "v2" = "classic"): Promise<LiquiditySignal[]> {
     const data = await gql<{ liquiditySignals: LiquiditySignal[] }>(
       `query ($runId: UUID, $ruleset: String) {
         liquiditySignals(runId: $runId, ruleset: $ruleset) {
@@ -62,6 +62,7 @@ export const DataFactory = {
           relativeVolume rvolPercentile rvolOk strongClose sectorConfirmed
           sweepSide sweptZoneType sweptZonePrice
           nearestZoneType nearestZonePrice distancePct timeframeContext
+          qualityScore confidenceRating sweepStrength atr14 scoreReasons
         }
       }`,
       { runId: runId ?? null, ruleset },
@@ -159,14 +160,28 @@ export const ActionFactory = {
     return data.runAnalysis;
   },
 
-  async runLiquidityAnalysis(ruleset: "classic" | "fresh" = "classic"): Promise<AnalysisRun> {
+  async runLiquidityAnalysis(
+    ruleset: "classic" | "fresh" | "v2" = "classic",
+    opts?: { requireRetest?: boolean; requireRelativeStrength?: boolean },
+  ): Promise<AnalysisRun> {
     const data = await gql<{ runLiquidityAnalysis: AnalysisRun }>(
-      `mutation ($ruleset: String) {
-        runLiquidityAnalysis(includeNifty50: true, includeNifty100: true, includeWatchlist: true, ruleset: $ruleset) {
+      `mutation ($ruleset: String, $requireRetest: Boolean, $requireRelativeStrength: Boolean) {
+        runLiquidityAnalysis(
+          includeNifty50: true
+          includeNifty100: true
+          includeWatchlist: true
+          ruleset: $ruleset
+          requireRetest: $requireRetest
+          requireRelativeStrength: $requireRelativeStrength
+        ) {
           id status asOfDate
         }
       }`,
-      { ruleset },
+      {
+        ruleset,
+        requireRetest: opts?.requireRetest ?? false,
+        requireRelativeStrength: opts?.requireRelativeStrength ?? false,
+      },
     );
     return data.runLiquidityAnalysis;
   },

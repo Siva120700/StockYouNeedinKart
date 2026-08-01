@@ -197,6 +197,8 @@ export function sourceLabel(source: string): string {
       return "Confluence";
     case "liquidity_fresh":
       return "Liquidity Fresh";
+    case "liquidity_v2":
+      return "Liquidity V2";
     case "liquidity":
       return "Liquidity";
     case "signals":

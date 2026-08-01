@@ -8,6 +8,7 @@ export type ScreenerStrategy =
   | "signals"
   | "liquidity"
   | "liquidity_fresh"
+  | "liquidity_v2"
   | "confluence"
   | "breakout"
   | "trade_score"

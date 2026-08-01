@@ -74,6 +74,17 @@ public static class TechnicalIndicators
         return Math.Round(trs.TakeLast(period).Average(), 4);
     }
 
+    /// <summary>Simple EMA of closes; bars chronological oldest-first. Null if fewer than period bars.</summary>
+    public static decimal? Ema(IReadOnlyList<MarketBarRow> chron, int period = 20)
+    {
+        if (chron.Count < period || period <= 0) return null;
+        var k = 2m / (period + 1);
+        decimal ema = chron.Take(period).Average(b => b.Close);
+        for (var i = period; i < chron.Count; i++)
+            ema = chron[i].Close * k + ema * (1m - k);
+        return Math.Round(ema, 4);
+    }
+
     public static bool AtrExpansion(IReadOnlyList<MarketBarRow> chron, int period = 14, int lookback = 5)
     {
         if (chron.Count < period + lookback + 1) return false;

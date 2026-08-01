@@ -33,7 +33,7 @@ import {
   type ExportColumn,
 } from "../utils/exportTable";
 
-type StrategyFilter = "all" | "signals" | "liquidity" | "liquidity_fresh" | "confluence" | "trade_score" | "breakout";
+type StrategyFilter = "all" | "signals" | "liquidity" | "liquidity_fresh" | "liquidity_v2" | "confluence" | "trade_score" | "breakout";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -68,6 +68,7 @@ function strategyLabel(strategy: string | null | undefined): string {
   if (strategy === "trade_score") return "Trade Score";
   if (strategy === "breakout") return "Breakout";
   if (strategy === "liquidity_fresh") return "Liquidity Fresh";
+  if (strategy === "liquidity_v2") return "Liquidity V2";
   if (strategy === "liquidity") return "Liquidity";
   if (strategy === "signals") return "Signals";
   return strategy ?? "";
@@ -77,11 +78,11 @@ function summaryRowId(row: BacktestSymbolSummary): string {
   return `${row.instrumentId}-${row.strategyFilter ?? "unknown"}`;
 }
 
-type BacktestStrategy = "signals" | "liquidity" | "liquidity_fresh" | "confluence" | "trade_score" | "breakout";
+type BacktestStrategy = "signals" | "liquidity" | "liquidity_fresh" | "liquidity_v2" | "confluence" | "trade_score" | "breakout";
 
 function strategiesForFilter(filter: StrategyFilter): readonly BacktestStrategy[] {
   return filter === "all"
-    ? (["signals", "liquidity", "liquidity_fresh", "confluence", "trade_score", "breakout"] as const)
+    ? (["signals", "liquidity", "liquidity_fresh", "liquidity_v2", "confluence", "trade_score", "breakout"] as const)
     : ([filter] as const);
 }
 
@@ -277,6 +278,7 @@ export default function BacktestPage() {
     return saved === "signals" ||
       saved === "liquidity" ||
       saved === "liquidity_fresh" ||
+      saved === "liquidity_v2" ||
       saved === "confluence" ||
       saved === "trade_score" ||
       saved === "breakout" ||
@@ -570,6 +572,7 @@ export default function BacktestPage() {
               <MenuItem value="signals">Signals</MenuItem>
               <MenuItem value="liquidity">Liquidity</MenuItem>
               <MenuItem value="liquidity_fresh">Liquidity Fresh</MenuItem>
+              <MenuItem value="liquidity_v2">Liquidity V2</MenuItem>
               <MenuItem value="confluence">Confluence</MenuItem>
               <MenuItem value="breakout">Breakout</MenuItem>
               <MenuItem value="trade_score">Trade Score</MenuItem>
@@ -776,6 +779,7 @@ export default function BacktestPage() {
                   <MenuItem value="signals">Signals</MenuItem>
                   <MenuItem value="liquidity">Liquidity</MenuItem>
                   <MenuItem value="liquidity_fresh">Liquidity Fresh</MenuItem>
+                  <MenuItem value="liquidity_v2">Liquidity V2</MenuItem>
                   <MenuItem value="confluence">Confluence</MenuItem>
                   <MenuItem value="breakout">Breakout</MenuItem>
                   <MenuItem value="trade_score">Trade Score</MenuItem>

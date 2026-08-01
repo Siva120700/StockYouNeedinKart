@@ -48,6 +48,11 @@ export type LiquiditySignal = {
   nearestZonePrice?: number | null;
   distancePct?: number | null;
   timeframeContext: string;
+  qualityScore?: number | null;
+  confidenceRating?: string | null;
+  sweepStrength?: string | null;
+  atr14?: number | null;
+  scoreReasons?: string[] | null;
 };
 
 export type OpenPosition = {

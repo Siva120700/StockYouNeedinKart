@@ -46,9 +46,9 @@ public sealed class BacktestService
         CancellationToken ct = default)
     {
         strategy = strategy.Trim().ToLowerInvariant();
-        if (strategy is not ("signals" or "liquidity" or "liquidity_fresh" or "confluence" or "trade_score" or "breakout"))
+        if (strategy is not ("signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout"))
             throw new ArgumentException(
-                "Strategy must be 'signals', 'liquidity', 'liquidity_fresh', 'confluence', 'trade_score', or 'breakout'.");
+                "Strategy must be 'signals', 'liquidity', 'liquidity_fresh', 'liquidity_v2', 'confluence', 'trade_score', or 'breakout'.");
 
         if (!_options.Enabled)
             throw new InvalidOperationException("Angel is disabled; cannot fetch historical candles.");
@@ -212,7 +212,12 @@ public sealed class BacktestService
         IReadOnlyList<MarketBarRow> sectorBars, CancellationToken ct,
         string strategy = "liquidity")
     {
-        var ruleset = strategy == "liquidity_fresh" ? "fresh" : "classic";
+        var ruleset = strategy switch
+        {
+            "liquidity_fresh" => "fresh",
+            "liquidity_v2" => "v2",
+            _ => "classic"
+        };
         var hourly = await FetchHourlyChunkedAsync(token, fromIst, toIst, ct);
         var dailyCandles = await FetchDailyChunkedAsync(token, fromIst, toIst, ct);
 
@@ -258,6 +263,7 @@ public sealed class BacktestService
         var runId = Guid.Empty;
         var step = 2; // evaluate every 2 hours to keep runtime reasonable
         var minIdx = 50;
+        var dailyTake = ruleset == "v2" ? 80 : 15;
 
         for (var i = minIdx; i < bars1hChron.Count; i += step)
         {
@@ -272,11 +278,27 @@ public sealed class BacktestService
             var dailyNewest = dailyChron
                 .Where(d => d.TradeDate <= asOfDate)
                 .OrderByDescending(d => d.TradeDate)
-                .Take(15)
+                .Take(dailyTake)
                 .ToList();
 
-            var signal = LiquidityAnalysisService.TryEvaluate(
-                userId, runId, asOfDate, token, bars1hNewest, bars4h, dailyNewest, livePrice: null, ruleset);
+            LiquiditySignalRow? signal;
+            if (ruleset == "v2")
+            {
+                signal = LiquidityV2Evaluator.TryEvaluate(
+                    userId, runId, asOfDate, token, bars1hNewest, bars4h, dailyNewest,
+                    livePrice: null,
+                    sectorConfirmed: false,
+                    niftyDailyNewestFirst: null,
+                    options: new LiquidityV2Evaluator.Options());
+                if (signal is not null)
+                    signal.SectorConfirmed = EvalSectorConfirmed(sectorBars, signal.Side, asOfDate);
+            }
+            else
+            {
+                signal = LiquidityAnalysisService.TryEvaluate(
+                    userId, runId, asOfDate, token, bars1hNewest, bars4h, dailyNewest, livePrice: null, ruleset);
+            }
+
             if (signal is null)
                 continue;
 

@@ -214,7 +214,7 @@ public sealed class Query
     {
         if (string.IsNullOrWhiteSpace(strategy)) return null;
         var s = strategy.Trim().ToLowerInvariant();
-        return s is "signals" or "liquidity" or "liquidity_fresh" or "confluence" or "trade_score" or "breakout" or "options_intraday" ? s : null;
+        return s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout" or "options_intraday" ? s : null;
     }
 
     private static string? NormalizeOutcomeResult(string? result)
@@ -249,6 +249,8 @@ public sealed class Mutation
         bool includeNifty100,
         bool includeWatchlist,
         string? ruleset,
+        bool? requireRetest,
+        bool? requireRelativeStrength,
         [Service] ICurrentUserAccessor user,
         [Service] LiquidityAnalysisService analysis,
         CancellationToken ct)
@@ -259,7 +261,9 @@ public sealed class Mutation
             includeWatchlist,
             "manual",
             ct,
-            ruleset ?? "classic");
+            ruleset ?? "classic",
+            requireRetest ?? false,
+            requireRelativeStrength ?? false);
 
     public async Task<TradeConfidenceRunRow> RunTradeConfidenceAnalysis(
         bool refreshSignals,

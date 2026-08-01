@@ -41,6 +41,7 @@ export default function App() {
               <Route path="/signals" element={<SignalsPage />} />
               <Route path="/liquidity" element={<LiquiditySignalsPage ruleset="classic" />} />
               <Route path="/liquidity-fresh" element={<LiquiditySignalsPage ruleset="fresh" />} />
+              <Route path="/liquidity-v2" element={<LiquiditySignalsPage ruleset="v2" />} />
               <Route path="/confluence" element={<ConfluencePage />} />
               <Route path="/breakout" element={<BreakoutPage />} />
               <Route path="/trade-score" element={<TradeScorePage />} />

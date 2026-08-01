@@ -31,6 +31,7 @@ type StrategyFilter =
   | "signals"
   | "liquidity"
   | "liquidity_fresh"
+  | "liquidity_v2"
   | "confluence"
   | "trade_score"
   | "breakout"
@@ -231,6 +232,7 @@ export default function OutcomesPage() {
           <MenuItem value="signals">Signals</MenuItem>
           <MenuItem value="liquidity">Liquidity</MenuItem>
           <MenuItem value="liquidity_fresh">Liquidity Fresh</MenuItem>
+          <MenuItem value="liquidity_v2">Liquidity V2</MenuItem>
           <MenuItem value="confluence">Confluence</MenuItem>
           <MenuItem value="trade_score">Trade Score</MenuItem>
           <MenuItem value="breakout">Breakout</MenuItem>
