@@ -56,6 +56,7 @@ public sealed class SignalOutcomeService
             TargetT2 = signal.TargetT2,
             TargetT3 = signal.TargetT3,
             AnalysisSignalId = signal.Id,
+            SectorConfirmed = signal.SectorConfirmed,
         }, ct);
 
     public Task OpenFromLiquidityAsync(LiquiditySignalRow signal, string ruleset, CancellationToken ct = default)
@@ -75,6 +76,7 @@ public sealed class SignalOutcomeService
             TargetT2 = signal.TargetT2,
             TargetT3 = signal.TargetT3,
             LiquiditySignalId = signal.Id,
+            SectorConfirmed = signal.SectorConfirmed,
         }, ct);
     }
 
@@ -94,6 +96,7 @@ public sealed class SignalOutcomeService
             TargetT3 = signal.TargetT3,
             AnalysisSignalId = signal.AnalysisSignalId,
             LiquiditySignalId = signal.LiquiditySignalId,
+            SectorConfirmed = signal.SectorConfirmed,
         }, ct);
 
     public Task OpenFromTradeScoreAsync(TradeConfidenceScoreRow score, CancellationToken ct = default)
@@ -113,6 +116,8 @@ public sealed class SignalOutcomeService
             AnalysisSignalId = score.AnalysisSignalId,
             LiquiditySignalId = score.LiquiditySignalId,
             TradeConfidenceScoreId = score.Id,
+            // Trade Score does not store sector on the score row; treat as unconfirmed unless both layers were.
+            SectorConfirmed = false,
         }, ct);
 
     public Task OpenFromBreakoutAsync(BreakoutConfirmationRow row, CancellationToken ct = default)
@@ -144,20 +149,23 @@ public sealed class SignalOutcomeService
             TargetT2 = t2,
             TargetT3 = t3,
             BreakoutConfirmationId = row.Id,
+            SectorConfirmed = false,
         }, ct);
     }
 
     public Task<IReadOnlyList<SignalOutcomeRow>> GetOutcomesAsync(
-        Guid userId, string? strategy, string? result, CancellationToken ct = default)
-        => _outcomes.GetOutcomesAsync(userId, strategy, result, ct);
+        Guid userId, string? strategy, string? result, bool sectorConfirmedOnly = false,
+        CancellationToken ct = default)
+        => _outcomes.GetOutcomesAsync(userId, strategy, result, sectorConfirmedOnly, ct);
 
     public Task<IReadOnlyList<SignalOutcomeRow>> GetOpenAsync(
         Guid userId, CancellationToken ct = default)
         => _outcomes.GetOpenAsync(userId, ct);
 
     public Task<IReadOnlyList<SignalOutcomeSummary>> GetSummariesAsync(
-        Guid userId, string? strategy, CancellationToken ct = default)
-        => _outcomes.GetSummariesAsync(userId, strategy, ct);
+        Guid userId, string? strategy, bool sectorConfirmedOnly = false,
+        CancellationToken ct = default)
+        => _outcomes.GetSummariesAsync(userId, strategy, sectorConfirmedOnly, ct);
 
     /// <summary>
     /// Import currently stored live setups into signal_outcomes (idempotent).
@@ -165,7 +173,7 @@ public sealed class SignalOutcomeService
     /// </summary>
     public async Task<int> BackfillFromLiveAsync(Guid userId, CancellationToken ct = default)
     {
-        var before = (await _outcomes.GetOutcomesAsync(userId, null, null, ct)).Count;
+        var before = (await _outcomes.GetOutcomesAsync(userId, null, null, ct: ct)).Count;
         var opened = 0;
 
         foreach (var sig in await _portfolio.GetSignalsAsync(userId, null, ct))
@@ -216,6 +224,7 @@ public sealed class SignalOutcomeService
                 TargetT3 = liq.TargetT3,
                 AnalysisSignalId = sig.Id,
                 LiquiditySignalId = liq.Id,
+                SectorConfirmed = sig.SectorConfirmed && liq.SectorConfirmed,
             }, ct);
             opened++;
         }
@@ -233,7 +242,7 @@ public sealed class SignalOutcomeService
             opened++;
         }
 
-        var after = (await _outcomes.GetOutcomesAsync(userId, null, null, ct)).Count;
+        var after = (await _outcomes.GetOutcomesAsync(userId, null, null, ct: ct)).Count;
         var created = Math.Max(0, after - before);
         _logger.LogInformation(
             "Outcome backfill: considered={Opened}, newly stored={Created} (duplicates skipped)",

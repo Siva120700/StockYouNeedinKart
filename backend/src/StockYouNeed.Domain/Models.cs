@@ -301,6 +301,7 @@ public sealed class BacktestNoteRow
     public decimal? RMultiple { get; set; }
     public string Notes { get; set; } = "";
     public bool? WouldTakeLive { get; set; }
+    public bool SectorConfirmed { get; set; }
     public string Source { get; set; } = "manual";
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -353,6 +354,7 @@ public sealed class SignalOutcomeRow
     public Guid? LiquiditySignalId { get; set; }
     public Guid? TradeConfidenceScoreId { get; set; }
     public Guid? BreakoutConfirmationId { get; set; }
+    public bool SectorConfirmed { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

@@ -33,6 +33,7 @@ public sealed class BacktestRepository : IBacktestRepository
           n.r_multiple AS RMultiple,
           n.notes AS Notes,
           n.would_take_live AS WouldTakeLive,
+          n.sector_confirmed AS SectorConfirmed,
           n.created_at AS CreatedAt,
           n.updated_at AS UpdatedAt
         """;
@@ -99,7 +100,8 @@ public sealed class BacktestRepository : IBacktestRepository
     }
 
     public async Task<BacktestSymbolSummary> GetSymbolSummaryAsync(
-        Guid userId, Guid instrumentId, string? strategy, decimal? minRiskReward = null, CancellationToken ct = default)
+        Guid userId, Guid instrumentId, string? strategy, decimal? minRiskReward = null,
+        bool sectorConfirmedOnly = false, CancellationToken ct = default)
     {
         const string sql = """
             SELECT
@@ -128,12 +130,12 @@ public sealed class BacktestRepository : IBacktestRepository
             FROM instruments i
             LEFT JOIN (
               SELECT user_id, instrument_id, strategy, result, target_hit_pct,
-                     entry_price, initial_stop_loss, target_t1, r_multiple
+                     entry_price, initial_stop_loss, target_t1, r_multiple, sector_confirmed
               FROM backtest_notes
               WHERE COALESCE(NULLIF(source, ''), 'manual') <> 'auto'
               UNION ALL
               SELECT user_id, instrument_id, strategy, result, target_hit_pct,
-                     entry_price, initial_stop_loss, target_t1, r_multiple
+                     entry_price, initial_stop_loss, target_t1, r_multiple, sector_confirmed
               FROM backtest_auto_notes
             ) n
               ON n.instrument_id = i.id
@@ -147,6 +149,7 @@ public sealed class BacktestRepository : IBacktestRepository
                  AND ABS(n.target_t1 - n.entry_price) / ABS(n.entry_price - n.initial_stop_loss) >= @minRiskReward
                )
              )
+             AND (NOT @sectorConfirmedOnly OR n.sector_confirmed)
             WHERE i.id = @instrumentId
             GROUP BY i.symbol, i.name
             """;
@@ -154,7 +157,7 @@ public sealed class BacktestRepository : IBacktestRepository
         await SetUserAsync(conn, userId);
         var row = await conn.QuerySingleOrDefaultAsync<BacktestSymbolSummary>(new CommandDefinition(
             sql,
-            new { userId, instrumentId, strategy, strategyFilter = strategy, minRiskReward },
+            new { userId, instrumentId, strategy, strategyFilter = strategy, minRiskReward, sectorConfirmedOnly },
             cancellationToken: ct));
         return row ?? new BacktestSymbolSummary
         {
@@ -164,7 +167,8 @@ public sealed class BacktestRepository : IBacktestRepository
     }
 
     public async Task<IReadOnlyList<BacktestSymbolSummary>> GetSummariesAsync(
-        Guid userId, string? strategy, decimal? minRiskReward = null, CancellationToken ct = default)
+        Guid userId, string? strategy, decimal? minRiskReward = null,
+        bool sectorConfirmedOnly = false, CancellationToken ct = default)
     {
         const string sql = """
             SELECT
@@ -192,12 +196,12 @@ public sealed class BacktestRepository : IBacktestRepository
               AVG(n.r_multiple) FILTER (WHERE n.r_multiple IS NOT NULL) AS AvgRMultiple
             FROM (
               SELECT user_id, instrument_id, strategy, result, target_hit_pct,
-                     entry_price, initial_stop_loss, target_t1, r_multiple
+                     entry_price, initial_stop_loss, target_t1, r_multiple, sector_confirmed
               FROM backtest_notes
               WHERE COALESCE(NULLIF(source, ''), 'manual') <> 'auto'
               UNION ALL
               SELECT user_id, instrument_id, strategy, result, target_hit_pct,
-                     entry_price, initial_stop_loss, target_t1, r_multiple
+                     entry_price, initial_stop_loss, target_t1, r_multiple, sector_confirmed
               FROM backtest_auto_notes
             ) n
             JOIN instruments i ON i.id = n.instrument_id
@@ -211,6 +215,7 @@ public sealed class BacktestRepository : IBacktestRepository
                   AND ABS(n.target_t1 - n.entry_price) / ABS(n.entry_price - n.initial_stop_loss) >= @minRiskReward
                 )
               )
+              AND (NOT @sectorConfirmedOnly OR n.sector_confirmed)
             GROUP BY i.id, i.symbol, i.name, n.strategy
             HAVING COUNT(*) > 0
             ORDER BY i.symbol, n.strategy
@@ -219,7 +224,7 @@ public sealed class BacktestRepository : IBacktestRepository
         await SetUserAsync(conn, userId);
         var rows = await conn.QueryAsync<BacktestSymbolSummary>(new CommandDefinition(
             sql,
-            new { userId, strategyFilter = strategy, minRiskReward },
+            new { userId, strategyFilter = strategy, minRiskReward, sectorConfirmedOnly },
             cancellationToken: ct));
         return rows.ToList();
     }
@@ -238,12 +243,13 @@ public sealed class BacktestRepository : IBacktestRepository
                   user_id, instrument_id, strategy, side, signal_date,
                   entry_price, initial_stop_loss, target_t1, target_t2, target_t3,
                   result, target_level, target_hit_pct, exit_price, exit_date,
-                  pnl_pct, r_multiple, notes, would_take_live, source)
+                  pnl_pct, r_multiple, notes, would_take_live, source, sector_confirmed)
                 VALUES (
                   @UserId, @InstrumentId, @Strategy, @Side::signal_side, @SignalDate,
                   @EntryPrice, @InitialStopLoss, @TargetT1, @TargetT2, @TargetT3,
                   @Result, @TargetLevel, @TargetHitPct, @ExitPrice, @ExitDate,
-                  @PnlPct, @RMultiple, @Notes, @WouldTakeLive, COALESCE(NULLIF(@Source, ''), 'manual'))
+                  @PnlPct, @RMultiple, @Notes, @WouldTakeLive, COALESCE(NULLIF(@Source, ''), 'manual'),
+                  @SectorConfirmed)
                 RETURNING id
                 """;
             note.Id = await conn.ExecuteScalarAsync<Guid>(new CommandDefinition(insertSql, note, cancellationToken: ct));
@@ -270,6 +276,7 @@ public sealed class BacktestRepository : IBacktestRepository
                   r_multiple = @RMultiple,
                   notes = @Notes,
                   would_take_live = @WouldTakeLive,
+                  sector_confirmed = @SectorConfirmed,
                   source = COALESCE(NULLIF(@Source, ''), source),
                   updated_at = now()
                 WHERE id = @Id AND user_id = @UserId
@@ -297,6 +304,7 @@ public sealed class BacktestRepository : IBacktestRepository
                       r_multiple = @RMultiple,
                       notes = @Notes,
                       would_take_live = @WouldTakeLive,
+                      sector_confirmed = @SectorConfirmed,
                       updated_at = now()
                     WHERE id = @Id AND user_id = @UserId
                     """;
@@ -418,12 +426,12 @@ public sealed class BacktestRepository : IBacktestRepository
               user_id, instrument_id, strategy, side, signal_date,
               entry_price, initial_stop_loss, target_t1, target_t2, target_t3,
               result, target_level, target_hit_pct, exit_price, exit_date,
-              pnl_pct, r_multiple, notes, would_take_live)
+              pnl_pct, r_multiple, notes, would_take_live, sector_confirmed)
             VALUES (
               @UserId, @InstrumentId, @Strategy, @Side::signal_side, @SignalDate,
               @EntryPrice, @InitialStopLoss, @TargetT1, @TargetT2, @TargetT3,
               @Result, @TargetLevel, @TargetHitPct, @ExitPrice, @ExitDate,
-              @PnlPct, @RMultiple, @Notes, @WouldTakeLive)
+              @PnlPct, @RMultiple, @Notes, @WouldTakeLive, @SectorConfirmed)
             """;
 
         using var conn = _db.CreateConnection();

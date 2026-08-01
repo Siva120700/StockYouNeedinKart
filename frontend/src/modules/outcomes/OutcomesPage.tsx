@@ -6,8 +6,10 @@ import {
   Alert,
   Button,
   Chip,
+  FormControlLabel,
   MenuItem,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from "@mui/material";
@@ -83,6 +85,7 @@ export default function OutcomesPage() {
   const [accordionRows, setAccordionRows] = useState<SignalOutcome[]>([]);
   const [strategy, setStrategy] = useState<StrategyFilter>("all");
   const [result, setResult] = useState<ResultFilter>("all");
+  const [sectorCheck, setSectorCheck] = useState(false);
   const [expanded, setExpanded] = useState<string | false>(false);
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState(false);
@@ -96,10 +99,11 @@ export default function OutcomesPage() {
     try {
       const strat = strategy === "all" ? null : strategy;
       const res = result === "all" ? null : result;
+      const sectorOnly = sectorCheck || null;
       const [sum, list, accordionList] = await Promise.all([
-        OutcomesApi.fetchSummaries(strat),
-        OutcomesApi.fetchOutcomes(strat, res),
-        OutcomesApi.fetchOutcomes(null, res),
+        OutcomesApi.fetchSummaries(strat, sectorOnly),
+        OutcomesApi.fetchOutcomes(strat, res, sectorOnly),
+        OutcomesApi.fetchOutcomes(null, res, sectorOnly),
       ]);
       setSummaries(sum);
       setRows(list);
@@ -210,11 +214,11 @@ export default function OutcomesPage() {
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, result]);
+  }, [strategy, result, sectorCheck]);
 
   useEffect(() => {
     setPageActions(
-      <Stack direction="row" spacing={1} alignItems="center">
+      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
         <TextField
           select
           size="small"
@@ -246,6 +250,16 @@ export default function OutcomesPage() {
           <MenuItem value="sl">SL</MenuItem>
           <MenuItem value="time_stop">Time stop</MenuItem>
         </TextField>
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={sectorCheck}
+              onChange={(e) => setSectorCheck(e.target.checked)}
+            />
+          }
+          label="Sector check"
+        />
         <Button
           size="small"
           variant="outlined"
@@ -276,7 +290,7 @@ export default function OutcomesPage() {
       </Stack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, result, loading, resolving, importing]);
+  }, [strategy, result, sectorCheck, loading, resolving, importing]);
 
   /** Shared columns for accordion + Outcomes table (sortable + searchable via ZenTable). */
   const outcomeColumns = useMemo(
@@ -304,6 +318,12 @@ export default function OutcomesPage() {
         headerName: "Side",
         width: 70,
         getValue: (r) => r.side.toUpperCase(),
+      }),
+      columnFactories.createBooleanColumn<SignalOutcome>({
+        field: "sectorConfirmed",
+        headerName: "Sector",
+        width: 80,
+        getValue: (r) => r.sectorConfirmed === true,
       }),
       columnFactories.createTextColumn<SignalOutcome>({
         field: "signalDate",
@@ -388,7 +408,8 @@ export default function OutcomesPage() {
         Breakout / Trade Score (or click Import live setups). 2) Rows appear as open. 3) Click
         Resolve open (or wait for Worker) to mark target / SL / time-stop from future bars. Hit
         rate = target ÷ (target + SL). Expand a strategy to sort/filter stocks; Days = exit date −
-        entry date.
+        entry date. Sector check keeps only setups where the linked sector index also broke the prior
+        2 sessions (same rule as live screeners).
       </Alert>
       {totals.setups === 0 && !loading && (
         <Alert severity="warning">

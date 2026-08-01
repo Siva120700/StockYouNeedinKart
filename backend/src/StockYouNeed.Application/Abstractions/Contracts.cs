@@ -167,10 +167,12 @@ public interface IBacktestRepository
         Guid userId, Guid? instrumentId, string? strategy, CancellationToken ct = default);
 
     Task<BacktestSymbolSummary> GetSymbolSummaryAsync(
-        Guid userId, Guid instrumentId, string? strategy, decimal? minRiskReward = null, CancellationToken ct = default);
+        Guid userId, Guid instrumentId, string? strategy, decimal? minRiskReward = null,
+        bool sectorConfirmedOnly = false, CancellationToken ct = default);
 
     Task<IReadOnlyList<BacktestSymbolSummary>> GetSummariesAsync(
-        Guid userId, string? strategy, decimal? minRiskReward = null, CancellationToken ct = default);
+        Guid userId, string? strategy, decimal? minRiskReward = null,
+        bool sectorConfirmedOnly = false, CancellationToken ct = default);
 
     Task<BacktestNoteRow> UpsertNoteAsync(BacktestNoteRow note, CancellationToken ct = default);
 
@@ -207,10 +209,12 @@ public interface ISignalOutcomeRepository
     Task OpenAsync(SignalOutcomeRow row, CancellationToken ct = default);
     Task<IReadOnlyList<SignalOutcomeRow>> GetOpenAsync(Guid userId, CancellationToken ct = default);
     Task<IReadOnlyList<SignalOutcomeRow>> GetOutcomesAsync(
-        Guid userId, string? strategy, string? result, CancellationToken ct = default);
+        Guid userId, string? strategy, string? result, bool sectorConfirmedOnly = false,
+        CancellationToken ct = default);
     Task ResolveAsync(SignalOutcomeRow row, CancellationToken ct = default);
     Task<IReadOnlyList<SignalOutcomeSummary>> GetSummariesAsync(
-        Guid userId, string? strategy, CancellationToken ct = default);
+        Guid userId, string? strategy, bool sectorConfirmedOnly = false,
+        CancellationToken ct = default);
 }
 
 public interface IOptionsIntradayRepository

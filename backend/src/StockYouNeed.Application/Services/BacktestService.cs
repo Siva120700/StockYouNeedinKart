@@ -59,28 +59,73 @@ public sealed class BacktestService
 
         var toIst = DateTime.Now;
         var fromIst = toIst.Date.AddYears(-1).AddDays(-15); // warmup buffer
+        var sectorBars = await LoadSectorDailyBarsAsync(token.InstrumentId, fromIst, toIst, ct);
 
         List<BacktestNoteRow> notes;
         if (strategy == "signals")
-            notes = await ReplaySignalsAsync(userId, token, fromIst, toIst, ct);
+            notes = await ReplaySignalsAsync(userId, token, fromIst, toIst, sectorBars, ct);
         else if (strategy == "confluence")
-            notes = await ReplayConfluenceAsync(userId, token, fromIst, toIst, ct);
+            notes = await ReplayConfluenceAsync(userId, token, fromIst, toIst, sectorBars, ct);
         else if (strategy == "trade_score")
-            notes = await ReplayTradeScoreAsync(userId, token, fromIst, toIst, ct);
+            notes = await ReplayTradeScoreAsync(userId, token, fromIst, toIst, sectorBars, ct);
         else if (strategy == "breakout")
-            notes = await ReplayBreakoutAsync(userId, token, fromIst, toIst, ct);
+            notes = await ReplayBreakoutAsync(userId, token, fromIst, toIst, sectorBars, ct);
         else
-            notes = await ReplayLiquidityAsync(userId, token, fromIst, toIst, ct, strategy);
+            notes = await ReplayLiquidityAsync(userId, token, fromIst, toIst, sectorBars, ct, strategy);
 
         await _backtest.DeleteAutoNotesAsync(userId, instrumentId, strategy, ct);
         await _backtest.InsertAutoNotesAsync(notes, ct);
 
         _logger.LogInformation(
-            "Historical backtest {Strategy} {Symbol}: {Count} setups over 1Y",
-            strategy, token.AppSymbol, notes.Count);
+            "Historical backtest {Strategy} {Symbol}: {Count} setups over 1Y (sectorBars={SectorBars})",
+            strategy, token.AppSymbol, notes.Count, sectorBars.Count);
 
         return await _backtest.GetSymbolSummaryAsync(userId, instrumentId, strategy, ct: ct);
     }
+
+    private async Task<List<MarketBarRow>> LoadSectorDailyBarsAsync(
+        Guid equityInstrumentId, DateTime fromIst, DateTime toIst, CancellationToken ct)
+    {
+        var sectorId = await _instruments.GetSectorIdForInstrumentAsync(equityInstrumentId, ct);
+        if (sectorId is null)
+            return [];
+
+        var sectorTokens = await _instruments.GetActiveTokensForSectorsAsync(ct);
+        var sectorToken = sectorTokens.FirstOrDefault(t => t.InstrumentId == sectorId.Value);
+        if (sectorToken is null)
+            return [];
+
+        try
+        {
+            var candles = await FetchDailyChunkedAsync(sectorToken, fromIst, toIst, ct);
+            return candles
+                .GroupBy(c => c.TradeDate)
+                .Select(g => g.OrderByDescending(c => c.BarTime ?? DateTimeOffset.MinValue).First())
+                .OrderBy(c => c.TradeDate)
+                .Select(c => new MarketBarRow
+                {
+                    InstrumentId = sectorToken.InstrumentId,
+                    AppSymbol = sectorToken.AppSymbol,
+                    TradeDate = c.TradeDate,
+                    Open = c.Open,
+                    High = c.High,
+                    Low = c.Low,
+                    Close = c.Close,
+                    Volume = c.Volume,
+                })
+                .ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Sector daily history unavailable for {Symbol}; sector_confirmed will be false.",
+                sectorToken.AppSymbol);
+            return [];
+        }
+    }
+
+    private static bool EvalSectorConfirmed(
+        IReadOnlyList<MarketBarRow> sectorBars, string side, DateOnly asOf) =>
+        SectorConfirmation.IsConfirmed(side, SectorConfirmation.AsOf(sectorBars, asOf));
 
     /// <summary>Planned R:R using T1 vs stop. Null when not computable.</summary>
     private static decimal? PlannedRiskReward(decimal entry, decimal sl, decimal? t1)
@@ -102,7 +147,8 @@ public sealed class BacktestService
         OppositeSignalFlipGuard.IsFlipAgainstOpenNotes(side, asOf, notes, out _);
 
     private async Task<List<BacktestNoteRow>> ReplaySignalsAsync(
-        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct)
+        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst,
+        IReadOnlyList<MarketBarRow> sectorBars, CancellationToken ct)
     {
         var candles = await FetchDailyChunkedAsync(token, fromIst, toIst, ct);
         var chron = candles
@@ -154,14 +200,16 @@ public sealed class BacktestService
 
             notes.Add(ToNote(userId, token, "signals", signal.Side, asOf,
                 signal.EntryPrice, signal.InitialStopLoss,
-                signal.TargetT1, signal.TargetT2, signal.TargetT3, outcome));
+                signal.TargetT1, signal.TargetT2, signal.TargetT3, outcome,
+                EvalSectorConfirmed(sectorBars, signal.Side, asOf)));
         }
 
         return notes;
     }
 
     private async Task<List<BacktestNoteRow>> ReplayLiquidityAsync(
-        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct,
+        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst,
+        IReadOnlyList<MarketBarRow> sectorBars, CancellationToken ct,
         string strategy = "liquidity")
     {
         var ruleset = strategy == "liquidity_fresh" ? "fresh" : "classic";
@@ -264,14 +312,16 @@ public sealed class BacktestService
 
             notes.Add(ToNote(userId, token, strategy, signal.Side, asOfDate,
                 signal.EntryPrice, signal.InitialStopLoss,
-                signal.TargetT1, signal.TargetT2, signal.TargetT3, outcome));
+                signal.TargetT1, signal.TargetT2, signal.TargetT3, outcome,
+                EvalSectorConfirmed(sectorBars, signal.Side, asOfDate)));
         }
 
         return notes;
     }
 
     private async Task<List<BacktestNoteRow>> ReplayConfluenceAsync(
-        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct)
+        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst,
+        IReadOnlyList<MarketBarRow> sectorBars, CancellationToken ct)
     {
         var hourly = await FetchHourlyChunkedAsync(token, fromIst, toIst, ct);
         var dailyCandles = await FetchDailyChunkedAsync(token, fromIst, toIst, ct);
@@ -347,13 +397,15 @@ public sealed class BacktestService
             var forward = forwardHourly(bars1hChron, i);
             var outcome = SimulateOutcome(liq.Side, entry, sl, liq.TargetT1, liq.TargetT2, liq.TargetT3, forward);
             notes.Add(ToNote(userId, token, "confluence", liq.Side, asOfDate, entry, sl,
-                liq.TargetT1, liq.TargetT2, liq.TargetT3, outcome));
+                liq.TargetT1, liq.TargetT2, liq.TargetT3, outcome,
+                EvalSectorConfirmed(sectorBars, liq.Side, asOfDate)));
         }
         return notes;
     }
 
     private async Task<List<BacktestNoteRow>> ReplayBreakoutAsync(
-        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct)
+        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst,
+        IReadOnlyList<MarketBarRow> sectorBars, CancellationToken ct)
     {
         var dailyCandles = await FetchDailyChunkedAsync(token, fromIst, toIst, ct);
         var dailyChron = dailyCandles
@@ -396,7 +448,8 @@ public sealed class BacktestService
             var forward = dailyChron.Skip(i + 1).Take(DailyTimeStopBars)
                 .Select(b => (b.High, b.Low, b.Close, (DateOnly?)b.TradeDate, (DateTimeOffset?)null)).ToList();
             var outcome = SimulateOutcome(result.Side, entry, sl, t1, t2, t3, forward);
-            notes.Add(ToNote(userId, token, "breakout", result.Side, asOf, entry, sl, t1, t2, t3, outcome));
+            notes.Add(ToNote(userId, token, "breakout", result.Side, asOf, entry, sl, t1, t2, t3, outcome,
+                EvalSectorConfirmed(sectorBars, result.Side, asOf)));
         }
         return notes;
     }
@@ -421,7 +474,8 @@ public sealed class BacktestService
                 (DateTimeOffset?)b.BarTime)).ToList();
 
     private async Task<List<BacktestNoteRow>> ReplayTradeScoreAsync(
-        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct)
+        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst,
+        IReadOnlyList<MarketBarRow> sectorBars, CancellationToken ct)
     {
         var hourly = await FetchHourlyChunkedAsync(token, fromIst, toIst, ct);
         var dailyCandles = await FetchDailyChunkedAsync(token, fromIst, toIst, ct);
@@ -554,7 +608,8 @@ public sealed class BacktestService
                 liq.TargetT1, liq.TargetT2, liq.TargetT3, forward);
 
             notes.Add(ToNote(userId, token, "trade_score", liq.Side, asOfDate,
-                entry, sl, liq.TargetT1, liq.TargetT2, liq.TargetT3, outcome));
+                entry, sl, liq.TargetT1, liq.TargetT2, liq.TargetT3, outcome,
+                EvalSectorConfirmed(sectorBars, liq.Side, asOfDate)));
         }
 
         return notes;
@@ -563,7 +618,8 @@ public sealed class BacktestService
     private static BacktestNoteRow ToNote(
         Guid userId, AngelTokenRow token, string strategy, string side, DateOnly signalDate,
         decimal entry, decimal sl, decimal? t1, decimal? t2, decimal? t3,
-        OutcomeSimulator.SimulatedOutcome outcome)
+        OutcomeSimulator.SimulatedOutcome outcome,
+        bool sectorConfirmed = false)
     {
         return new BacktestNoteRow
         {
@@ -586,7 +642,8 @@ public sealed class BacktestService
             PnlPct = outcome.PnlPct,
             RMultiple = outcome.RMultiple,
             Notes = "auto:1y",
-            Source = "auto"
+            Source = "auto",
+            SectorConfirmed = sectorConfirmed,
         };
     }
 

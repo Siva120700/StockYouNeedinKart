@@ -336,6 +336,7 @@ public sealed class OptionsIntradayService
                     TargetT3 = t3,
                     LiquiditySignalId = liq.Id,
                     AnalysisSignalId = analysisId,
+                    SectorConfirmed = liq.SectorConfirmed,
                 }, ct);
                 written++;
             }

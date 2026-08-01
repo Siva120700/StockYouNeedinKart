@@ -295,6 +295,10 @@ export default function BacktestPage() {
     const saved = sessionStorage.getItem("backtest.riskRewardCheck");
     return saved !== "false";
   });
+  const [sectorCheck, setSectorCheck] = useState(() => {
+    const saved = sessionStorage.getItem("backtest.sectorCheck");
+    return saved === "true";
+  });
   const [batchProgress, setBatchProgress] = useState<{
     current: number;
     total: number;
@@ -314,7 +318,7 @@ export default function BacktestPage() {
     try {
       const strat = strategyFilter === "all" ? null : strategyFilter;
       const minRr = riskRewardCheck ? 1 : null;
-      const rows = await DataFactory.backtestSummaries(strat, minRr);
+      const rows = await DataFactory.backtestSummaries(strat, minRr, sectorCheck || null);
       setSummaries(rows);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -322,7 +326,7 @@ export default function BacktestPage() {
       setIsSyncing(false);
       setLoading(false);
     }
-  }, [strategyFilter, riskRewardCheck, setIsSyncing]);
+  }, [strategyFilter, riskRewardCheck, sectorCheck, setIsSyncing]);
 
   useEffect(() => {
     setTitle("Backtest");
@@ -479,7 +483,7 @@ export default function BacktestPage() {
         ? "All strategies"
         : strategyLabel(strategyFilter);
     downloadPdfTable({
-      title: `Backtest 1Y · ${filterLabel}${riskRewardCheck ? " · R:R ≥ 1" : ""}`,
+      title: `Backtest 1Y · ${filterLabel}${riskRewardCheck ? " · R:R ≥ 1" : ""}${sectorCheck ? " · Sector" : ""}`,
       fileName: exportStamp("backtest", "pdf"),
       columns: backtestExportColumns,
       rows: visibleRows,
@@ -627,6 +631,21 @@ export default function BacktestPage() {
               />
             }
             label="R:R ≥ 1"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={sectorCheck}
+                disabled={runningAll}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setSectorCheck(next);
+                  sessionStorage.setItem("backtest.sectorCheck", String(next));
+                }}
+              />
+            }
+            label="Sector check"
           />
           <FormControlLabel
             control={

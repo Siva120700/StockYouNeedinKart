@@ -104,10 +104,11 @@ export const DataFactory = {
     instrumentId: string,
     strategy?: string | null,
     minRiskReward?: number | null,
+    sectorConfirmedOnly?: boolean | null,
   ): Promise<BacktestSymbolSummary> {
     const data = await gql<{ backtestSummary: BacktestSymbolSummary }>(
-      `query ($instrumentId: UUID!, $strategy: String, $minRiskReward: Float) {
-        backtestSummary(instrumentId: $instrumentId, strategy: $strategy, minRiskReward: $minRiskReward) {
+      `query ($instrumentId: UUID!, $strategy: String, $minRiskReward: Float, $sectorConfirmedOnly: Boolean) {
+        backtestSummary(instrumentId: $instrumentId, strategy: $strategy, minRiskReward: $minRiskReward, sectorConfirmedOnly: $sectorConfirmedOnly) {
           instrumentId appSymbol instrumentName strategyFilter
           timesInStrategy targetHits slHits skipped openCount
           targetHitRatePct avgTargetHitPct avgRiskReward avgRMultiple
@@ -117,6 +118,7 @@ export const DataFactory = {
         instrumentId,
         strategy: strategy ?? null,
         minRiskReward: minRiskReward ?? null,
+        sectorConfirmedOnly: sectorConfirmedOnly ?? null,
       },
     );
     return data.backtestSummary;
@@ -125,16 +127,21 @@ export const DataFactory = {
   async backtestSummaries(
     strategy?: string | null,
     minRiskReward?: number | null,
+    sectorConfirmedOnly?: boolean | null,
   ): Promise<BacktestSymbolSummary[]> {
     const data = await gql<{ backtestSummaries: BacktestSymbolSummary[] }>(
-      `query ($strategy: String, $minRiskReward: Float) {
-        backtestSummaries(strategy: $strategy, minRiskReward: $minRiskReward) {
+      `query ($strategy: String, $minRiskReward: Float, $sectorConfirmedOnly: Boolean) {
+        backtestSummaries(strategy: $strategy, minRiskReward: $minRiskReward, sectorConfirmedOnly: $sectorConfirmedOnly) {
           instrumentId appSymbol instrumentName strategyFilter
           timesInStrategy targetHits slHits skipped openCount
           targetHitRatePct avgTargetHitPct avgRiskReward avgRMultiple
         }
       }`,
-      { strategy: strategy ?? null, minRiskReward: minRiskReward ?? null },
+      {
+        strategy: strategy ?? null,
+        minRiskReward: minRiskReward ?? null,
+        sectorConfirmedOnly: sectorConfirmedOnly ?? null,
+      },
     );
     return data.backtestSummaries;
   },

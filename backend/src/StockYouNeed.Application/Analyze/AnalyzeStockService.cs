@@ -152,7 +152,7 @@ public sealed class AnalyzeStockService
         try
         {
             result.BacktestSummary = await _backtest.GetSymbolSummaryAsync(
-                userId, instrumentId, null, null, ct);
+                userId, instrumentId, null, null, sectorConfirmedOnly: false, ct: ct);
         }
         catch
         {

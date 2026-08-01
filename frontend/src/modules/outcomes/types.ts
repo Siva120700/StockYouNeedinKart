@@ -18,6 +18,7 @@ export type SignalOutcome = {
   exitDate: string | null;
   pnlPct: number | null;
   rMultiple: number | null;
+  sectorConfirmed?: boolean;
 };
 
 export type SignalOutcomeSummary = {

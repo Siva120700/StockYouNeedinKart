@@ -17,12 +17,12 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
               id, user_id, instrument_id, strategy, side, signal_date,
               entry_price, initial_stop_loss, target_t1, target_t2, target_t3,
               result, analysis_signal_id, liquidity_signal_id,
-              trade_confidence_score_id, breakout_confirmation_id)
+              trade_confidence_score_id, breakout_confirmation_id, sector_confirmed)
             VALUES (
               @Id, @UserId, @InstrumentId, @Strategy, @Side::signal_side, @SignalDate,
               @EntryPrice, @InitialStopLoss, @TargetT1, @TargetT2, @TargetT3,
               'open', @AnalysisSignalId, @LiquiditySignalId,
-              @TradeConfidenceScoreId, @BreakoutConfirmationId)
+              @TradeConfidenceScoreId, @BreakoutConfirmationId, @SectorConfirmed)
             ON CONFLICT (user_id, strategy, instrument_id, side, signal_date) DO NOTHING
             """;
         using var conn = _db.CreateConnection();
@@ -30,10 +30,7 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
         await conn.ExecuteAsync(new CommandDefinition(sql, row, cancellationToken: ct));
     }
 
-    public async Task<IReadOnlyList<SignalOutcomeRow>> GetOpenAsync(Guid userId, CancellationToken ct = default)
-    {
-        const string sql = """
-            SELECT
+    private const string OutcomeSelect = """
               o.id AS Id,
               o.user_id AS UserId,
               o.instrument_id AS InstrumentId,
@@ -58,8 +55,16 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
               o.liquidity_signal_id AS LiquiditySignalId,
               o.trade_confidence_score_id AS TradeConfidenceScoreId,
               o.breakout_confirmation_id AS BreakoutConfirmationId,
+              o.sector_confirmed AS SectorConfirmed,
               o.created_at AS CreatedAt,
               o.updated_at AS UpdatedAt
+            """;
+
+    public async Task<IReadOnlyList<SignalOutcomeRow>> GetOpenAsync(Guid userId, CancellationToken ct = default)
+    {
+        var sql = $"""
+            SELECT
+            {OutcomeSelect}
             FROM signal_outcomes o
             JOIN instruments i ON i.id = o.instrument_id
             WHERE o.user_id = @userId AND o.result = 'open'
@@ -73,48 +78,25 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
     }
 
     public async Task<IReadOnlyList<SignalOutcomeRow>> GetOutcomesAsync(
-        Guid userId, string? strategy, string? result, CancellationToken ct = default)
+        Guid userId, string? strategy, string? result, bool sectorConfirmedOnly = false,
+        CancellationToken ct = default)
     {
-        const string sql = """
+        var sql = $"""
             SELECT
-              o.id AS Id,
-              o.user_id AS UserId,
-              o.instrument_id AS InstrumentId,
-              i.symbol AS AppSymbol,
-              i.name AS InstrumentName,
-              o.strategy AS Strategy,
-              o.side::text AS Side,
-              o.signal_date AS SignalDate,
-              o.entry_price AS EntryPrice,
-              o.initial_stop_loss AS InitialStopLoss,
-              o.target_t1 AS TargetT1,
-              o.target_t2 AS TargetT2,
-              o.target_t3 AS TargetT3,
-              o.result AS Result,
-              o.target_level AS TargetLevel,
-              o.target_hit_pct AS TargetHitPct,
-              o.exit_price AS ExitPrice,
-              o.exit_date AS ExitDate,
-              o.pnl_pct AS PnlPct,
-              o.r_multiple AS RMultiple,
-              o.analysis_signal_id AS AnalysisSignalId,
-              o.liquidity_signal_id AS LiquiditySignalId,
-              o.trade_confidence_score_id AS TradeConfidenceScoreId,
-              o.breakout_confirmation_id AS BreakoutConfirmationId,
-              o.created_at AS CreatedAt,
-              o.updated_at AS UpdatedAt
+            {OutcomeSelect}
             FROM signal_outcomes o
             JOIN instruments i ON i.id = o.instrument_id
             WHERE o.user_id = @userId
               AND (@strategy IS NULL OR o.strategy = @strategy)
               AND (@result IS NULL OR o.result = @result)
+              AND (NOT @sectorConfirmedOnly OR o.sector_confirmed)
             ORDER BY o.signal_date DESC, i.symbol
             LIMIT 2000
             """;
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, userId);
         var rows = await conn.QueryAsync<SignalOutcomeRow>(
-            new CommandDefinition(sql, new { userId, strategy, result }, cancellationToken: ct));
+            new CommandDefinition(sql, new { userId, strategy, result, sectorConfirmedOnly }, cancellationToken: ct));
         return rows.ToList();
     }
 
@@ -138,7 +120,7 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
     }
 
     public async Task<IReadOnlyList<SignalOutcomeSummary>> GetSummariesAsync(
-        Guid userId, string? strategy, CancellationToken ct = default)
+        Guid userId, string? strategy, bool sectorConfirmedOnly = false, CancellationToken ct = default)
     {
         const string sql = """
             SELECT
@@ -163,13 +145,14 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
             FROM signal_outcomes o
             WHERE o.user_id = @userId
               AND (@strategy IS NULL OR o.strategy = @strategy)
+              AND (NOT @sectorConfirmedOnly OR o.sector_confirmed)
             GROUP BY o.strategy
             ORDER BY o.strategy
             """;
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, userId);
         var rows = await conn.QueryAsync<SignalOutcomeSummary>(
-            new CommandDefinition(sql, new { userId, strategy }, cancellationToken: ct));
+            new CommandDefinition(sql, new { userId, strategy, sectorConfirmedOnly }, cancellationToken: ct));
         return rows.ToList();
     }
 

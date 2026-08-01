@@ -133,6 +133,7 @@ public sealed class Query
         Guid instrumentId,
         string? strategy,
         double? minRiskReward,
+        bool? sectorConfirmedOnly,
         [Service] ICurrentUserAccessor user,
         [Service] IBacktestRepository backtest,
         CancellationToken ct)
@@ -141,7 +142,8 @@ public sealed class Query
         {
             decimal? minRr = minRiskReward is null ? null : (decimal)minRiskReward.Value;
             return await backtest.GetSymbolSummaryAsync(
-                user.UserId, instrumentId, NormalizeStrategy(strategy), minRr, ct);
+                user.UserId, instrumentId, NormalizeStrategy(strategy), minRr,
+                sectorConfirmedOnly == true, ct);
         }
         catch (Exception ex)
         {
@@ -152,6 +154,7 @@ public sealed class Query
     public async Task<IReadOnlyList<BacktestSymbolSummary>> BacktestSummaries(
         string? strategy,
         double? minRiskReward,
+        bool? sectorConfirmedOnly,
         [Service] ICurrentUserAccessor user,
         [Service] IBacktestRepository backtest,
         CancellationToken ct)
@@ -160,7 +163,8 @@ public sealed class Query
         {
             decimal? minRr = minRiskReward is null ? null : (decimal)minRiskReward.Value;
             return await backtest.GetSummariesAsync(
-                user.UserId, NormalizeStrategy(strategy), minRr, ct);
+                user.UserId, NormalizeStrategy(strategy), minRr,
+                sectorConfirmedOnly == true, ct);
         }
         catch (Exception ex)
         {
@@ -171,6 +175,7 @@ public sealed class Query
     public async Task<IReadOnlyList<SignalOutcomeRow>> SignalOutcomes(
         string? strategy,
         string? result,
+        bool? sectorConfirmedOnly,
         [Service] ICurrentUserAccessor user,
         [Service] Application.Outcomes.SignalOutcomeService outcomes,
         CancellationToken ct)
@@ -178,7 +183,8 @@ public sealed class Query
         try
         {
             return await outcomes.GetOutcomesAsync(
-                user.UserId, NormalizeStrategy(strategy), NormalizeOutcomeResult(result), ct);
+                user.UserId, NormalizeStrategy(strategy), NormalizeOutcomeResult(result),
+                sectorConfirmedOnly == true, ct);
         }
         catch (Exception ex)
         {
@@ -188,13 +194,15 @@ public sealed class Query
 
     public async Task<IReadOnlyList<SignalOutcomeSummary>> SignalOutcomeSummaries(
         string? strategy,
+        bool? sectorConfirmedOnly,
         [Service] ICurrentUserAccessor user,
         [Service] Application.Outcomes.SignalOutcomeService outcomes,
         CancellationToken ct)
     {
         try
         {
-            return await outcomes.GetSummariesAsync(user.UserId, NormalizeStrategy(strategy), ct);
+            return await outcomes.GetSummariesAsync(
+                user.UserId, NormalizeStrategy(strategy), sectorConfirmedOnly == true, ct);
         }
         catch (Exception ex)
         {
