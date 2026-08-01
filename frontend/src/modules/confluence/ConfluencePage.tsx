@@ -5,6 +5,11 @@ import { columnFactories } from "../../zen_components/table/columnFactories";
 import ZenTable from "../../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
+import {
+  createHistoricalHitRateColumn,
+  loadHistoricalHitRates,
+  type HitRateByInstrument,
+} from "../../utils/historicalHitRate";
 import { ConfluenceApi } from "./api";
 import type { ConfluenceSignal } from "./types";
 
@@ -23,6 +28,7 @@ export default function ConfluencePage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [rows, setRows] = useState<ConfluenceSignal[]>([]);
+  const [hitRates, setHitRates] = useState<HitRateByInstrument>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [sectorCheck, setSectorCheck] = useState(false);
@@ -33,7 +39,12 @@ export default function ConfluencePage() {
     setError(null);
     setIsSyncing(true);
     try {
-      setRows(await ConfluenceApi.fetchSignals());
+      const [signals, rates] = await Promise.all([
+        ConfluenceApi.fetchSignals(),
+        loadHistoricalHitRates("confluence"),
+      ]);
+      setRows(signals);
+      setHitRates(rates);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -91,6 +102,7 @@ export default function ConfluencePage() {
   const columns = useMemo(
     () => [
       columnFactories.createTextColumn<ConfluenceSignal>({ field: "appSymbol", headerName: "Symbol", width: 110, getValue: (r) => r.appSymbol }),
+      createHistoricalHitRateColumn<ConfluenceSignal>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<ConfluenceSignal>(
         { buy: { label: "BUY", color: "#2e7d32" }, sell: { label: "SELL", color: "#c62828" } },
         { field: "side", headerName: "Side", width: 90, getValue: (r) => r.side },
@@ -105,7 +117,7 @@ export default function ConfluencePage() {
         { field: "actions", headerName: "", width: 72 },
       ),
     ],
-    [],
+    [hitRates],
   );
 
   return (

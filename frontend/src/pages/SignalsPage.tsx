@@ -13,6 +13,12 @@ import {
   exportStamp,
   type ExportColumn,
 } from "../utils/exportTable";
+import {
+  createHistoricalHitRateColumn,
+  formatHitRatePct,
+  loadHistoricalHitRates,
+  type HitRateByInstrument,
+} from "../utils/historicalHitRate";
 
 function formatTarget(row: Signal, target: number | null | undefined) {
   if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice) return "";
@@ -40,21 +46,11 @@ function formatSl(row: Signal) {
   })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
 }
 
-const signalExportColumns: ExportColumn<Signal>[] = [
-  { header: "Symbol", value: (r) => r.appSymbol },
-  { header: "Side", value: (r) => (r.side === "sell" ? "SELL" : "BUY") },
-  { header: "Entry", value: (r) => r.entryPrice },
-  { header: "SL", value: (r) => formatSl(r) },
-  { header: "T1", value: (r) => formatTarget(r, r.targetT1) },
-  { header: "T2", value: (r) => formatTarget(r, r.targetT2) },
-  { header: "T3", value: (r) => formatTarget(r, r.targetT3) },
-  { header: "Vol OK", value: (r) => (r.volumeOk ? "Yes" : "No") },
-];
-
 export default function SignalsPage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [rows, setRows] = useState<Signal[]>([]);
+  const [hitRates, setHitRates] = useState<HitRateByInstrument>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [sectorCheck, setSectorCheck] = useState(false);
@@ -62,11 +58,34 @@ export default function SignalsPage() {
   const [freshCrossCheck, setFreshCrossCheck] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const signalExportColumns: ExportColumn<Signal>[] = useMemo(
+    () => [
+      { header: "Symbol", value: (r) => r.appSymbol },
+      {
+        header: "Hit %",
+        value: (r) => formatHitRatePct(hitRates.get(r.instrumentId)),
+      },
+      { header: "Side", value: (r) => (r.side === "sell" ? "SELL" : "BUY") },
+      { header: "Entry", value: (r) => r.entryPrice },
+      { header: "SL", value: (r) => formatSl(r) },
+      { header: "T1", value: (r) => formatTarget(r, r.targetT1) },
+      { header: "T2", value: (r) => formatTarget(r, r.targetT2) },
+      { header: "T3", value: (r) => formatTarget(r, r.targetT3) },
+      { header: "Vol OK", value: (r) => (r.volumeOk ? "Yes" : "No") },
+    ],
+    [hitRates],
+  );
+
   async function refresh() {
     setError(null);
     setIsSyncing(true);
     try {
-      setRows(await DataFactory.signals());
+      const [signals, rates] = await Promise.all([
+        DataFactory.signals(),
+        loadHistoricalHitRates("signals"),
+      ]);
+      setRows(signals);
+      setHitRates(rates);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -226,6 +245,7 @@ export default function SignalsPage() {
         width: 120,
         getValue: (r) => r.appSymbol,
       }),
+      createHistoricalHitRateColumn<Signal>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<Signal>(
         {
           buy: { label: "BUY", color: "#2e7d32" },
@@ -286,7 +306,7 @@ export default function SignalsPage() {
         { field: "actions", headerName: "", width: 72 },
       ),
     ];
-  }, []);
+  }, [hitRates]);
 
   return (
     <>

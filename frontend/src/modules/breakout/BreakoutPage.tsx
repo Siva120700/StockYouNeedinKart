@@ -5,6 +5,11 @@ import { columnFactories } from "../../zen_components/table/columnFactories";
 import ZenTable from "../../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
+import {
+  createHistoricalHitRateColumn,
+  loadHistoricalHitRates,
+  type HitRateByInstrument,
+} from "../../utils/historicalHitRate";
 import { BreakoutApi } from "./api";
 import type { BreakoutConfirmation } from "./types";
 import { patternLabel } from "./types";
@@ -13,6 +18,7 @@ export default function BreakoutPage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [rows, setRows] = useState<BreakoutConfirmation[]>([]);
+  const [hitRates, setHitRates] = useState<HitRateByInstrument>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [confirmedOnly, setConfirmedOnly] = useState(true);
@@ -22,7 +28,12 @@ export default function BreakoutPage() {
     setError(null);
     setIsSyncing(true);
     try {
-      setRows(await BreakoutApi.fetchConfirmations(false));
+      const [confirmations, rates] = await Promise.all([
+        BreakoutApi.fetchConfirmations(false),
+        loadHistoricalHitRates("breakout"),
+      ]);
+      setRows(confirmations);
+      setHitRates(rates);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -74,6 +85,7 @@ export default function BreakoutPage() {
   const columns = useMemo(
     () => [
       columnFactories.createTextColumn<BreakoutConfirmation>({ field: "appSymbol", headerName: "Symbol", width: 110, getValue: (r) => r.appSymbol }),
+      createHistoricalHitRateColumn<BreakoutConfirmation>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<BreakoutConfirmation>(
         { buy: { label: "BUY", color: "#2e7d32" }, sell: { label: "SELL", color: "#c62828" } },
         { field: "side", headerName: "Side", width: 90, getValue: (r) => r.side },
@@ -92,7 +104,7 @@ export default function BreakoutPage() {
         getValue: (r) => (r.volumeRatio != null ? `${Number(r.volumeRatio).toFixed(2)}×` : ""),
       }),
     ],
-    [],
+    [hitRates],
   );
 
   return (

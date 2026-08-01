@@ -18,6 +18,11 @@ import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { TradeScoreApi } from "./api";
 import type { TradeConfidenceScore } from "./types";
 import { ratingLabel } from "./types";
+import {
+  createHistoricalHitRateColumn,
+  loadHistoricalHitRates,
+  type HitRateByInstrument,
+} from "../../utils/historicalHitRate";
 
 function riskReward(row: TradeConfidenceScore): number | null {
   const entry = Number(row.entryPrice);
@@ -34,6 +39,7 @@ export default function TradeScorePage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [rows, setRows] = useState<TradeConfidenceScore[]>([]);
+  const [hitRates, setHitRates] = useState<HitRateByInstrument>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [minScore, setMinScore] = useState(60);
@@ -43,7 +49,12 @@ export default function TradeScorePage() {
     setError(null);
     setIsSyncing(true);
     try {
-      setRows(await TradeScoreApi.fetchScores());
+      const [scores, rates] = await Promise.all([
+        TradeScoreApi.fetchScores(),
+        loadHistoricalHitRates("trade_score"),
+      ]);
+      setRows(scores);
+      setHitRates(rates);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -125,6 +136,7 @@ export default function TradeScorePage() {
         width: 110,
         getValue: (r) => r.appSymbol,
       }),
+      createHistoricalHitRateColumn<TradeConfidenceScore>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<TradeConfidenceScore>(
         {
           buy: { label: "BUY", color: "#2e7d32" },
@@ -179,7 +191,7 @@ export default function TradeScorePage() {
         { field: "actions", headerName: "", width: 72 },
       ),
     ],
-    [],
+    [hitRates],
   );
 
   return (

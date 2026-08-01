@@ -13,6 +13,12 @@ import {
   exportStamp,
   type ExportColumn,
 } from "../utils/exportTable";
+import {
+  createHistoricalHitRateColumn,
+  formatHitRatePct,
+  loadHistoricalHitRates,
+  type HitRateByInstrument,
+} from "../utils/historicalHitRate";
 
 type ScoredLiquiditySignal = LiquiditySignal & { score: number };
 
@@ -42,7 +48,7 @@ function formatSl(row: LiquiditySignal) {
   })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
 }
 
-const liquidityExportColumns: ExportColumn<ScoredLiquiditySignal>[] = [
+const liquidityExportBase: ExportColumn<ScoredLiquiditySignal>[] = [
   { header: "Score", value: (r) => r.score },
   { header: "Symbol", value: (r) => r.appSymbol },
   { header: "Side", value: (r) => (r.side === "sell" ? "SELL" : "BUY") },
@@ -86,6 +92,7 @@ export default function LiquiditySignalsPage({
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [rows, setRows] = useState<LiquiditySignal[]>([]);
+  const [hitRates, setHitRates] = useState<HitRateByInstrument>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [sectorCheck, setSectorCheck] = useState(false);
@@ -94,12 +101,31 @@ export default function LiquiditySignalsPage({
 
   const pageTitle = ruleset === "fresh" ? "Liquidity Fresh" : "Liquidity";
   const exportBase = ruleset === "fresh" ? "liquidity-fresh" : "liquidity";
+  const strategyKey = ruleset === "fresh" ? "liquidity_fresh" : "liquidity";
+
+  const liquidityExportColumns: ExportColumn<ScoredLiquiditySignal>[] = useMemo(
+    () => [
+      liquidityExportBase[0]!,
+      liquidityExportBase[1]!,
+      {
+        header: "Hit %",
+        value: (r) => formatHitRatePct(hitRates.get(r.instrumentId)),
+      },
+      ...liquidityExportBase.slice(2),
+    ],
+    [hitRates],
+  );
 
   async function refresh() {
     setError(null);
     setIsSyncing(true);
     try {
-      setRows(await DataFactory.liquiditySignals(undefined, ruleset));
+      const [signals, rates] = await Promise.all([
+        DataFactory.liquiditySignals(undefined, ruleset),
+        loadHistoricalHitRates(strategyKey),
+      ]);
+      setRows(signals);
+      setHitRates(rates);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -300,6 +326,7 @@ export default function LiquiditySignalsPage({
         width: 110,
         getValue: (r) => r.appSymbol,
       }),
+      createHistoricalHitRateColumn<Scored>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<Scored>(
         {
           buy: { label: "BUY", color: "#2e7d32" },
@@ -387,7 +414,7 @@ export default function LiquiditySignalsPage({
         { field: "actions", headerName: "", width: 72 },
       ),
     ];
-  }, []);
+  }, [hitRates]);
 
   return (
     <>

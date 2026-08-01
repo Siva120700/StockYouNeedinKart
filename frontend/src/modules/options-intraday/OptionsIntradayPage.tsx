@@ -17,6 +17,11 @@ import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrima
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { OptionsIntradayApi } from "./api";
 import type { OptionsIntradayRecommendation } from "./types";
+import {
+  createHistoricalHitRateColumn,
+  loadHistoricalHitRates,
+  type HitRateByInstrument,
+} from "../../utils/historicalHitRate";
 
 function fmt(n: number | null | undefined, d = 2): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
@@ -33,6 +38,7 @@ export default function OptionsIntradayPage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [rows, setRows] = useState<OptionsIntradayRecommendation[]>([]);
+  const [hitRates, setHitRates] = useState<HitRateByInstrument>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +49,12 @@ export default function OptionsIntradayPage() {
     setError(null);
     setIsSyncing(true);
     try {
-      setRows(await OptionsIntradayApi.fetchRecommendations());
+      const [recs, rates] = await Promise.all([
+        OptionsIntradayApi.fetchRecommendations(),
+        loadHistoricalHitRates("options_intraday"),
+      ]);
+      setRows(recs);
+      setHitRates(rates);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -115,6 +126,10 @@ export default function OptionsIntradayPage() {
         width: 100,
         getValue: (r) => r.appSymbol,
       }),
+      createHistoricalHitRateColumn<OptionsIntradayRecommendation>(
+        hitRates,
+        (r) => r.instrumentId,
+      ),
       columnFactories.createTextColumn<OptionsIntradayRecommendation>({
         field: "side",
         headerName: "Side",
@@ -188,7 +203,7 @@ export default function OptionsIntradayPage() {
         getValue: (r) => r.status,
       }),
     ],
-    [],
+    [hitRates],
   );
 
   const expanded = rows.find((r) => r.id === expandedId) ?? null;
