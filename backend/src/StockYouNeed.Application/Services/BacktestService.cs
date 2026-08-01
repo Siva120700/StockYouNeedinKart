@@ -4,6 +4,7 @@ using StockYouNeed.Application.Abstractions;
 using StockYouNeed.Application.Options;
 using StockYouNeed.Application.Confluence;
 using StockYouNeed.Application.Outcomes;
+using StockYouNeed.Application.Signals;
 using StockYouNeed.Application.TradeScore;
 using StockYouNeed.Domain;
 
@@ -96,6 +97,10 @@ public sealed class BacktestService
         return rr is decimal v && v >= min;
     }
 
+    /// <summary>Skip opposite-side setup while a prior note is still open within 2 calendar days.</summary>
+    private static bool IsFlipBlocked(List<BacktestNoteRow> notes, string side, DateOnly asOf) =>
+        OppositeSignalFlipGuard.IsFlipAgainstOpenNotes(side, asOf, notes, out _);
+
     private async Task<List<BacktestNoteRow>> ReplaySignalsAsync(
         Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst, CancellationToken ct)
     {
@@ -136,6 +141,9 @@ public sealed class BacktestService
                 continue;
 
             if (!MeetsMinRiskReward(signal.EntryPrice, signal.InitialStopLoss, signal.TargetT1))
+                continue;
+
+            if (IsFlipBlocked(notes, signal.Side, asOf))
                 continue;
 
             var forward = bars.Skip(i + 1).Take(DailyTimeStopBars).ToList();
@@ -241,6 +249,9 @@ public sealed class BacktestService
                     continue;
             }
 
+            if (IsFlipBlocked(notes, signal.Side, asOfDate))
+                continue;
+
             var forward = bars1hChron.Skip(i + 1).Take(HourlyTimeStopBars)
                 .Select(b => (b.High, b.Low, b.Close,
                     (DateOnly?)DateOnly.FromDateTime(b.BarTime.ToOffset(TimeSpan.FromHours(5.5)).DateTime),
@@ -331,6 +342,7 @@ public sealed class BacktestService
             if (!MeetsMinRiskReward(entry, sl, liq.TargetT1)) continue;
             if (rulesetFreshSkip(liq, asOfBar)) continue;
             if (dedupeRecent(notes, liq.Side, asOfBar)) continue;
+            if (IsFlipBlocked(notes, liq.Side, asOfDate)) continue;
 
             var forward = forwardHourly(bars1hChron, i);
             var outcome = SimulateOutcome(liq.Side, entry, sl, liq.TargetT1, liq.TargetT2, liq.TargetT3, forward);
@@ -377,6 +389,9 @@ public sealed class BacktestService
             var t3 = result.Side == SignalSides.Buy ? entry + risk * 4m : entry - risk * 4m;
 
             if (!MeetsMinRiskReward(entry, sl, t1)) continue;
+
+            if (IsFlipBlocked(notes, result.Side, asOf))
+                continue;
 
             var forward = dailyChron.Skip(i + 1).Take(DailyTimeStopBars)
                 .Select(b => (b.High, b.Low, b.Close, (DateOnly?)b.TradeDate, (DateTimeOffset?)null)).ToList();
@@ -524,6 +539,9 @@ public sealed class BacktestService
                 if (last.Side == liq.Side && (curTime - lastTime).TotalHours < 6)
                     continue;
             }
+
+            if (IsFlipBlocked(notes, liq.Side, asOfDate))
+                continue;
 
             var forward = bars1hChron.Skip(i + 1).Take(HourlyTimeStopBars)
                 .Select(b => (b.High, b.Low, b.Close,
