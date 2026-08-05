@@ -1,5 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, FormControlLabel, Switch, Stack as MuiStack } from "@mui/material";
+import {
+  Alert,
+  Button,
+  Checkbox,
+  FormControl,
+  FormControlLabel,
+  InputLabel,
+  ListItemText,
+  MenuItem,
+  OutlinedInput,
+  Select,
+  type SelectChangeEvent,
+  Switch,
+  Stack as MuiStack,
+  Tooltip,
+} from "@mui/material";
 import { Play, ArrowSquareOut, FilePdf, FileXls } from "@phosphor-icons/react";
 import { ActionFactory, DataFactory } from "../api/factories";
 import type { LiquiditySignal } from "../api/types";
@@ -21,6 +36,33 @@ import {
 } from "../utils/historicalHitRate";
 
 type ScoredLiquiditySignal = LiquiditySignal & { score: number };
+
+const ALL_V2_EVENTS = [
+  "external_sweep",
+  "internal_liquidity",
+  "liquidity_cluster",
+  "delayed_reclaim",
+  "multi_sweep",
+] as const;
+
+type V2EventType = (typeof ALL_V2_EVENTS)[number];
+
+function eventTypeLabel(eventType: string | null | undefined): string {
+  switch (eventType) {
+    case "external_sweep":
+      return "External Sweep";
+    case "internal_liquidity":
+      return "Internal Liquidity";
+    case "liquidity_cluster":
+      return "Liquidity Cluster";
+    case "delayed_reclaim":
+      return "Delayed Reclaim";
+    case "multi_sweep":
+      return "Multi Sweep";
+    default:
+      return eventType ?? "";
+  }
+}
 
 function formatTarget(row: LiquiditySignal, target: number | null | undefined) {
   if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice) return "";
@@ -99,6 +141,7 @@ export default function LiquiditySignalsPage({
   const [riskRewardCheck, setRiskRewardCheck] = useState(false);
   const [requireRetest, setRequireRetest] = useState(false);
   const [requireRelativeStrength, setRequireRelativeStrength] = useState(false);
+  const [eventFilter, setEventFilter] = useState<V2EventType[]>([...ALL_V2_EVENTS]);
   const [error, setError] = useState<string | null>(null);
 
   const isV2 = ruleset === "v2";
@@ -119,8 +162,20 @@ export default function LiquiditySignalsPage({
       },
       ...(isV2
         ? ([
+            { header: "Event", value: (r: ScoredLiquiditySignal) => eventTypeLabel(r.eventType) },
             { header: "Confidence", value: (r: ScoredLiquiditySignal) => r.confidenceRating ?? "" },
             { header: "Sweep str", value: (r: ScoredLiquiditySignal) => r.sweepStrength ?? "" },
+            {
+              header: "ATR14",
+              value: (r: ScoredLiquiditySignal) =>
+                r.atr14 != null && Number.isFinite(Number(r.atr14))
+                  ? Number(r.atr14).toFixed(2)
+                  : "",
+            },
+            {
+              header: "Score reasons",
+              value: (r: ScoredLiquiditySignal) => (r.scoreReasons ?? []).join("; "),
+            },
           ] as ExportColumn<ScoredLiquiditySignal>[])
         : []),
       ...liquidityExportBase.slice(2),
@@ -242,8 +297,30 @@ export default function LiquiditySignalsPage({
         return rr != null && rr >= 1;
       });
     }
+    if (isV2 && eventFilter.length > 0 && eventFilter.length < ALL_V2_EVENTS.length) {
+      const allowed = new Set<string>(eventFilter);
+      list = list.filter((r) => r.eventType != null && allowed.has(r.eventType));
+    } else if (isV2 && eventFilter.length === 0) {
+      list = [];
+    }
     return list.sort((a, b) => b.score - a.score);
-  }, [rows, sectorCheck, riskRewardCheck]);
+  }, [rows, sectorCheck, riskRewardCheck, isV2, eventFilter]);
+
+  function onEventFilterChange(event: SelectChangeEvent<string[]>) {
+    const raw = event.target.value;
+    const value = typeof raw === "string" ? raw.split(",") : raw;
+    if (value.includes("all")) {
+      setEventFilter(
+        eventFilter.length === ALL_V2_EVENTS.length ? [] : [...ALL_V2_EVENTS],
+      );
+      return;
+    }
+    setEventFilter(
+      value.filter((v): v is V2EventType =>
+        (ALL_V2_EVENTS as readonly string[]).includes(v),
+      ),
+    );
+  }
 
   function onExportPdf() {
     downloadPdfTable({
@@ -300,6 +377,43 @@ export default function LiquiditySignalsPage({
         />
         {isV2 ? (
           <>
+            <FormControl size="small" sx={{ minWidth: 180, mr: 1 }}>
+              <InputLabel>Event</InputLabel>
+              <Select
+                multiple
+                label="Event"
+                value={eventFilter}
+                onChange={onEventFilterChange}
+                input={<OutlinedInput label="Event" />}
+                renderValue={(selected) =>
+                  selected.length === ALL_V2_EVENTS.length
+                    ? "All events"
+                    : selected.length === 0
+                      ? "No events"
+                      : selected.length === 1
+                        ? eventTypeLabel(selected[0])
+                        : `${selected.length} events`
+                }
+              >
+                <MenuItem value="all">
+                  <Checkbox
+                    size="small"
+                    checked={eventFilter.length === ALL_V2_EVENTS.length}
+                    indeterminate={
+                      eventFilter.length > 0 &&
+                      eventFilter.length < ALL_V2_EVENTS.length
+                    }
+                  />
+                  <ListItemText primary="All" />
+                </MenuItem>
+                {ALL_V2_EVENTS.map((e) => (
+                  <MenuItem key={e} value={e}>
+                    <Checkbox size="small" checked={eventFilter.includes(e)} />
+                    <ListItemText primary={eventTypeLabel(e)} />
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
             <FormControlLabel
               control={
                 <Switch
@@ -361,6 +475,7 @@ export default function LiquiditySignalsPage({
     riskRewardCheck,
     requireRetest,
     requireRelativeStrength,
+    eventFilter,
     visibleRows,
     pageTitle,
     isV2,
@@ -376,9 +491,23 @@ export default function LiquiditySignalsPage({
         width: 80,
         minDecimalPlaces: 0,
         getValue: (r) => r.score,
+        displayRenderer: (value, row) => {
+          const reasons = (row.scoreReasons ?? []).join(" · ") || "No score reasons";
+          return (
+            <Tooltip title={reasons} arrow placement="top">
+              <span>{value == null || value === "" ? "—" : String(value)}</span>
+            </Tooltip>
+          );
+        },
       }),
       ...(isV2
         ? [
+            columnFactories.createTextColumn<Scored>({
+              field: "eventType",
+              headerName: "Event",
+              width: 130,
+              getValue: (r) => eventTypeLabel(r.eventType),
+            }),
             columnFactories.createTextColumn<Scored>({
               field: "confidenceRating",
               headerName: "Conf",
@@ -507,10 +636,10 @@ export default function LiquiditySignalsPage({
           sectorCheck || riskRewardCheck
             ? `No ${pageTitle.toLowerCase()} signals match the active filters. Turn filters off, or Run again.`
             : ruleset === "fresh"
-              ? "No liquidity fresh signals. Click Run (stricter confirm window + skip spent T1)."
+              ? "No liquidity fresh setups still near entry. Click Run."
               : ruleset === "v2"
-                ? "No liquidity V2 signals. Click Run (ATR/HTF/quality filters)."
-                : "No liquidity signals. Click Run liquidity (needs 1H bars + 4H sweep + 1H confirm)."
+                ? "No liquidity V2 setups still near entry (T1 open). Click Run."
+                : "No liquidity setups still near entry. Click Run."
         }
       />
     </>

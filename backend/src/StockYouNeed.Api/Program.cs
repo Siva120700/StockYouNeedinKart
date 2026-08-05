@@ -60,15 +60,28 @@ using (var scope = app.Services.CreateScope())
         await instruments.EnsureDemoUserAsync(auth.DemoUserId, auth.DemoEmail, auth.DemoDisplayName);
         var seeder = scope.ServiceProvider.GetRequiredService<UniverseSeedService>();
         await seeder.SeedAsync();
-        // Map new Nifty 100 symbols to Angel tokens (Worker also does this daily).
-        var tokenSync = scope.ServiceProvider.GetRequiredService<TokenSyncService>();
-        await tokenSync.SyncUniverseTokensAsync();
     }
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "Seed skipped — database may be offline.");
     }
 }
+
+// Don't block Kestrel on Angel token sync (can hang offline / rate-limit).
+_ = Task.Run(async () =>
+{
+    try
+    {
+        await using var scope = app.Services.CreateAsyncScope();
+        var tokenSync = scope.ServiceProvider.GetRequiredService<TokenSyncService>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        await tokenSync.SyncUniverseTokensAsync(cts.Token);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Background token sync skipped/failed.");
+    }
+});
 
 app.Run();
 

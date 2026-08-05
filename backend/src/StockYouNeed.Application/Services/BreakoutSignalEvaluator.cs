@@ -6,7 +6,8 @@ namespace StockYouNeed.Application.Services;
 public static class BreakoutSignalEvaluator
 {
     public static AnalysisSignalRow? Evaluate(
-        Guid userId, Guid runId, DateOnly asOf, List<MarketBarRow> barsDesc, decimal? livePrice = null)
+        Guid userId, Guid runId, DateOnly asOf, List<MarketBarRow> barsDesc, decimal? livePrice = null,
+        bool actionableOnly = false)
     {
         var latest = barsDesc[0];
         var prev = barsDesc.Skip(1).Take(2).ToList();
@@ -22,15 +23,16 @@ public static class BreakoutSignalEvaluator
         var avgVolPrior3 = prior3.Average(b => (double)b.Volume);
         var volumeOk = latest.Volume >= (long)(avgVolPrior3 * 0.25);
 
-        const decimal ImminentMargin = 0.005m;
+        const decimal ImminentMargin = 0.01m;
         var ltp = livePrice ?? latest.Close;
 
-        string? side = null;
         var buyBreak = latest.High > last2High;
         var sellBreak = latest.Low < last2Low;
-        var buyImminent = !buyBreak && ltp >= last2High * (1m - ImminentMargin);
-        var sellImminent = !sellBreak && ltp <= last2Low * (1m + ImminentMargin);
+        var buyImminent = !buyBreak && ltp >= last2High * (1m - ImminentMargin) && ltp < last2High;
+        var sellImminent = !sellBreak && ltp <= last2Low * (1m + ImminentMargin) && ltp > last2Low;
 
+        string? side = null;
+        // Live + backtest both use break or imminent; live filters "already ran" after targets.
         if ((buyBreak || buyImminent) && (sellBreak || sellImminent) && volumeOk)
         {
             var mid = (last2High + last2Low) / 2m;
@@ -107,6 +109,21 @@ public static class BreakoutSignalEvaluator
             t3 = sellTargets.Count > 2 ? sellTargets[2] : null;
         }
 
+        // Drop / roll targets already tagged on the signal bar so only actionable entries remain.
+        (t1, t2, t3) = RollPastSpentTargets(side, t1, t2, t3, ltp, latest);
+        if (t1 is null)
+            return null;
+
+        // Still require room to T1 vs stop (skip tiny leftover targets after a wide SL).
+        var risk = Math.Abs(entry - sl);
+        var reward = Math.Abs(t1.Value - entry);
+        if (risk <= 0 || reward < risk)
+            return null;
+
+        if (actionableOnly
+            && !LiquidityAnalysisService.IsLiveEntryStillOpen(side, entry, t1.Value, ltp))
+            return null;
+
         return new AnalysisSignalRow
         {
             Id = Guid.NewGuid(),
@@ -130,6 +147,40 @@ public static class BreakoutSignalEvaluator
             Last2dHigh = last2High,
             Last2dLow = last2Low
         };
+    }
+
+    /// <summary>
+    /// If T1 was already tagged by live mark or today's bar, promote T2→T1 etc.
+    /// Returns null T1 when no unused target remains (setup is spent).
+    /// </summary>
+    internal static (decimal? T1, decimal? T2, decimal? T3) RollPastSpentTargets(
+        string side,
+        decimal? t1,
+        decimal? t2,
+        decimal? t3,
+        decimal markPrice,
+        MarketBarRow signalBar)
+    {
+        var queue = new List<decimal>();
+        if (t1 is decimal a) queue.Add(a);
+        if (t2 is decimal b) queue.Add(b);
+        if (t3 is decimal c) queue.Add(c);
+
+        while (queue.Count > 0 && IsTargetTagged(side, queue[0], markPrice, signalBar))
+            queue.RemoveAt(0);
+
+        return (
+            queue.Count > 0 ? queue[0] : null,
+            queue.Count > 1 ? queue[1] : null,
+            queue.Count > 2 ? queue[2] : null);
+    }
+
+    internal static bool IsTargetTagged(
+        string side, decimal target, decimal markPrice, MarketBarRow signalBar)
+    {
+        if (side == SignalSides.Buy)
+            return markPrice >= target || signalBar.Close >= target || signalBar.High >= target;
+        return markPrice <= target || signalBar.Close <= target || signalBar.Low <= target;
     }
 
     public static bool IsFreshCross(List<MarketBarRow> barsNewestFirst, string side)

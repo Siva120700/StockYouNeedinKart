@@ -62,6 +62,7 @@ export const DataFactory = {
           relativeVolume rvolPercentile rvolOk strongClose sectorConfirmed
           sweepSide sweptZoneType sweptZonePrice
           nearestZoneType nearestZonePrice distancePct timeframeContext
+          eventType zoneTags
           qualityScore confidenceRating sweepStrength atr14 scoreReasons
         }
       }`,
@@ -248,6 +249,20 @@ export const ActionFactory = {
       { noteId },
     );
     return data.deleteBacktestNote;
+  },
+
+  /** Clears backtest rows. Default: auto notes only for the given strategies (manual kept). */
+  async deleteBacktests(
+    strategies?: string[] | null,
+    autoOnly = true,
+  ): Promise<number> {
+    const data = await gql<{ deleteBacktests: number }>(
+      `mutation ($strategies: [String!], $autoOnly: Boolean!) {
+        deleteBacktests(strategies: $strategies, autoOnly: $autoOnly)
+      }`,
+      { strategies: strategies ?? null, autoOnly },
+    );
+    return data.deleteBacktests;
   },
 
   async runHistoricalBacktest(

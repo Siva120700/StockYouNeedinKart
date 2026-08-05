@@ -425,6 +425,14 @@ public sealed class Mutation
         CancellationToken ct)
         => await backtest.DeleteNoteAsync(user.UserId, noteId, ct);
 
+    public async Task<int> DeleteBacktests(
+        string[]? strategies,
+        bool autoOnly,
+        [Service] ICurrentUserAccessor user,
+        [Service] IBacktestRepository backtest,
+        CancellationToken ct)
+        => await backtest.DeleteBacktestsAsync(user.UserId, strategies, autoOnly, ct);
+
     public async Task<BacktestSymbolSummary> RunHistoricalBacktest(
         Guid instrumentId,
         string strategy,

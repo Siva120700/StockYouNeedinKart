@@ -5,9 +5,16 @@ import {
   AccordionSummary,
   Alert,
   Button,
+  Checkbox,
   Chip,
+  FormControl,
   FormControlLabel,
+  InputLabel,
+  ListItemText,
   MenuItem,
+  OutlinedInput,
+  Select,
+  type SelectChangeEvent,
   Stack,
   Switch,
   TextField,
@@ -26,18 +33,35 @@ import {
   type SignalOutcomeSummary,
 } from "./types";
 
-type StrategyFilter =
-  | "all"
-  | "signals"
-  | "liquidity"
-  | "liquidity_fresh"
-  | "liquidity_v2"
-  | "confluence"
-  | "trade_score"
-  | "breakout"
-  | "options_intraday";
+const ALL_OUTCOME_STRATEGIES = [
+  "signals",
+  "liquidity",
+  "liquidity_fresh",
+  "liquidity_v2",
+  "confluence",
+  "trade_score",
+  "breakout",
+  "options_intraday",
+] as const;
+
+type OutcomeStrategy = (typeof ALL_OUTCOME_STRATEGIES)[number];
 
 type ResultFilter = "all" | "open" | "target" | "sl" | "time_stop";
+
+function isOutcomeStrategy(value: string): value is OutcomeStrategy {
+  return (ALL_OUTCOME_STRATEGIES as readonly string[]).includes(value);
+}
+
+function isAllOutcomeStrategies(selected: readonly OutcomeStrategy[]): boolean {
+  return selected.length === ALL_OUTCOME_STRATEGIES.length;
+}
+
+function strategySelectionLabel(selected: readonly OutcomeStrategy[]): string {
+  if (selected.length === 0) return "None";
+  if (isAllOutcomeStrategies(selected)) return "All";
+  if (selected.length === 1) return strategyLabel(selected[0]);
+  return `${selected.length} strategies`;
+}
 
 function fmt(n: number | null | undefined, digits = 2): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
@@ -78,13 +102,28 @@ function fmtDays(n: number | null | undefined): string {
   return `${n.toFixed(n < 10 ? 1 : 0)}d`;
 }
 
+function filterByStrategies<T>(
+  items: T[],
+  selected: readonly OutcomeStrategy[],
+  getStrategy: (item: T) => string | null | undefined,
+): T[] {
+  if (isAllOutcomeStrategies(selected)) return items;
+  const set = new Set<string>(selected);
+  return items.filter((item) => {
+    const s = getStrategy(item);
+    return s != null && set.has(s);
+  });
+}
+
 export default function OutcomesPage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [summaries, setSummaries] = useState<SignalOutcomeSummary[]>([]);
   const [rows, setRows] = useState<SignalOutcome[]>([]);
   const [accordionRows, setAccordionRows] = useState<SignalOutcome[]>([]);
-  const [strategy, setStrategy] = useState<StrategyFilter>("all");
+  const [strategyFilter, setStrategyFilter] = useState<OutcomeStrategy[]>([
+    ...ALL_OUTCOME_STRATEGIES,
+  ]);
   const [result, setResult] = useState<ResultFilter>("all");
   const [sectorCheck, setSectorCheck] = useState(false);
   const [expanded, setExpanded] = useState<string | false>(false);
@@ -94,11 +133,25 @@ export default function OutcomesPage() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  function onStrategyFilterChange(event: SelectChangeEvent<string[]>) {
+    const raw = event.target.value;
+    const value = typeof raw === "string" ? raw.split(",") : raw;
+    if (value.includes("all")) {
+      // "All" toggles: clear when everything is already selected.
+      setStrategyFilter(
+        isAllOutcomeStrategies(strategyFilter) ? [] : [...ALL_OUTCOME_STRATEGIES],
+      );
+      return;
+    }
+    setStrategyFilter(value.filter(isOutcomeStrategy));
+  }
+
   async function refresh() {
     setError(null);
     setIsSyncing(true);
     try {
-      const strat = strategy === "all" ? null : strategy;
+      const strat =
+        strategyFilter.length === 1 ? strategyFilter[0]! : null;
       const res = result === "all" ? null : result;
       const sectorOnly = sectorCheck || null;
       const [sum, list, accordionList] = await Promise.all([
@@ -106,9 +159,9 @@ export default function OutcomesPage() {
         OutcomesApi.fetchOutcomes(strat, res, sectorOnly),
         OutcomesApi.fetchOutcomes(null, res, sectorOnly),
       ]);
-      setSummaries(sum);
-      setRows(list);
-      setAccordionRows(accordionList);
+      setSummaries(filterByStrategies(sum, strategyFilter, (s) => s.strategyFilter));
+      setRows(filterByStrategies(list, strategyFilter, (o) => o.strategy));
+      setAccordionRows(filterByStrategies(accordionList, strategyFilter, (o) => o.strategy));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -215,29 +268,42 @@ export default function OutcomesPage() {
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, result, sectorCheck]);
+  }, [strategyFilter, result, sectorCheck]);
 
   useEffect(() => {
     setPageActions(
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-        <TextField
-          select
-          size="small"
-          label="Strategy"
-          value={strategy}
-          onChange={(e) => setStrategy(e.target.value as StrategyFilter)}
-          sx={{ minWidth: 160 }}
-        >
-          <MenuItem value="all">All</MenuItem>
-          <MenuItem value="signals">Signals</MenuItem>
-          <MenuItem value="liquidity">Liquidity</MenuItem>
-          <MenuItem value="liquidity_fresh">Liquidity Fresh</MenuItem>
-          <MenuItem value="liquidity_v2">Liquidity V2</MenuItem>
-          <MenuItem value="confluence">Confluence</MenuItem>
-          <MenuItem value="trade_score">Trade Score</MenuItem>
-          <MenuItem value="breakout">Breakout</MenuItem>
-          <MenuItem value="options_intraday">Options Intraday</MenuItem>
-        </TextField>
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel>Strategy</InputLabel>
+          <Select
+            multiple
+            label="Strategy"
+            value={strategyFilter}
+            onChange={onStrategyFilterChange}
+            input={<OutlinedInput label="Strategy" />}
+            renderValue={(selected) =>
+              strategySelectionLabel(selected as OutcomeStrategy[])
+            }
+          >
+            <MenuItem value="all">
+              <Checkbox
+                size="small"
+                checked={isAllOutcomeStrategies(strategyFilter)}
+                indeterminate={
+                  strategyFilter.length > 0 &&
+                  strategyFilter.length < ALL_OUTCOME_STRATEGIES.length
+                }
+              />
+              <ListItemText primary="All" />
+            </MenuItem>
+            {ALL_OUTCOME_STRATEGIES.map((s) => (
+              <MenuItem key={s} value={s}>
+                <Checkbox size="small" checked={strategyFilter.includes(s)} />
+                <ListItemText primary={strategyLabel(s)} />
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <TextField
           select
           size="small"
@@ -292,7 +358,7 @@ export default function OutcomesPage() {
       </Stack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategy, result, sectorCheck, loading, resolving, importing]);
+  }, [strategyFilter, result, sectorCheck, loading, resolving, importing]);
 
   /** Shared columns for accordion + Outcomes table (sortable + searchable via ZenTable). */
   const outcomeColumns = useMemo(

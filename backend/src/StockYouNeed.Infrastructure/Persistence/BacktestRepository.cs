@@ -366,6 +366,71 @@ public sealed class BacktestRepository : IBacktestRepository
         return affected > 0;
     }
 
+    public async Task<int> DeleteBacktestsAsync(
+        Guid userId,
+        IReadOnlyList<string>? strategies,
+        bool autoOnly = true,
+        CancellationToken ct = default)
+    {
+        var filters = strategies?
+            .Select(s => s.Trim().ToLowerInvariant())
+            .Where(s => s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2"
+                or "confluence" or "trade_score" or "breakout")
+            .Distinct()
+            .ToArray();
+
+        using var conn = _db.CreateConnection();
+        await SetUserAsync(conn, userId);
+
+        var deleted = 0;
+        if (filters is { Length: > 0 })
+        {
+            deleted += await conn.ExecuteAsync(new CommandDefinition(
+                """
+                DELETE FROM backtest_auto_notes
+                WHERE user_id = @userId
+                  AND strategy = ANY(@filters)
+                """,
+                new { userId, filters },
+                cancellationToken: ct));
+
+            if (!autoOnly)
+            {
+                deleted += await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    DELETE FROM backtest_notes
+                    WHERE user_id = @userId
+                      AND strategy = ANY(@filters)
+                    """,
+                    new { userId, filters },
+                    cancellationToken: ct));
+            }
+        }
+        else
+        {
+            deleted += await conn.ExecuteAsync(new CommandDefinition(
+                """
+                DELETE FROM backtest_auto_notes
+                WHERE user_id = @userId
+                """,
+                new { userId },
+                cancellationToken: ct));
+
+            if (!autoOnly)
+            {
+                deleted += await conn.ExecuteAsync(new CommandDefinition(
+                    """
+                    DELETE FROM backtest_notes
+                    WHERE user_id = @userId
+                    """,
+                    new { userId },
+                    cancellationToken: ct));
+            }
+        }
+
+        return deleted;
+    }
+
     private static void NormalizeNote(BacktestNoteRow note)
     {
         note.Strategy = note.Strategy.Trim().ToLowerInvariant();

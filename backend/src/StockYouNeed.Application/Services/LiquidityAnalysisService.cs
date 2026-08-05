@@ -9,16 +9,18 @@ using StockYouNeed.Domain;
 namespace StockYouNeed.Application.Services;
 
 /// <summary>
-/// Separate liquidity engine: 4H sweep zones + 1H confirm (RVOL percentile, strong close, breakout).
+/// Separate liquidity engine: 4H sweep zones + 1H confirm (RVOL, strong close, breakout).
 /// Does not touch daily AnalysisRunService / analysis_signals.
 /// </summary>
 public sealed class LiquidityAnalysisService
 {
-    private const decimal EqualTolPct = 0.0015m;
-    private const decimal ImminentMargin = 0.005m;
-    private const decimal RvolFloor = 1.2m;
-    private const double RvolPercentileGate = 0.75; // top 25%
-    private const decimal StrongClosePct = 0.70m;
+    // Level-1 (safest) relaxations: slightly more setups, small accuracy trade-off.
+    private const decimal ImminentMargin = 0.01m;
+    private const decimal RvolFloor = 1.0m;
+    private const decimal StrongClosePct = 0.60m;
+    private const int SweepMaxBars = 8;
+    private const int ClassicConfirmWindow = 15;
+    private const int FreshConfirmWindow = 8;
     private const decimal TargetMinDistancePct = 0.002m;
     private const int RvolLookback = 20;
     private const int RvolHistoryBars = 50;
@@ -156,12 +158,16 @@ public sealed class LiquidityAnalysisService
             var sectorConfirmedCount = 0;
             var openOutcomes = await _outcomes.GetOpenAsync(userId, ct);
             var dailyBarLimit = ruleset == "v2" ? 80 : 10;
-            var v2Options = new LiquidityV2Evaluator.Options(requireRetest, requireRelativeStrength);
+            var v2Options = new LiquidityV2Evaluator.Options(
+                requireRetest, requireRelativeStrength, ActionableOnly: true);
+            var v2Diag = new LiquidityV2Evaluator.Diagnostics();
 
             foreach (var token in tokens)
             {
                 ct.ThrowIfCancellationRequested();
                 scanned++;
+                if (ruleset == "v2")
+                    v2Diag.Pass("scanned");
 
                 var bars1h = (await _market.GetIntradayBarsForInstrumentAsync(
                     token.InstrumentId, IntradayBarsSyncService.Interval1h, 120, ct)).ToList();
@@ -169,6 +175,8 @@ public sealed class LiquidityAnalysisService
                 if (bars1h.Count < Min1hBars)
                 {
                     fewBars++;
+                    if (ruleset == "v2")
+                        v2Diag.Reject("few_intraday_bars");
                     continue;
                 }
 
@@ -176,6 +184,8 @@ public sealed class LiquidityAnalysisService
                 if (bars4h.Count < Min4hBars)
                 {
                     fewBars++;
+                    if (ruleset == "v2")
+                        v2Diag.Reject("few_intraday_bars");
                     continue;
                 }
 
@@ -194,7 +204,8 @@ public sealed class LiquidityAnalysisService
                         ltp > 0 ? ltp : null,
                         sectorConfirmed: false,
                         niftyDaily,
-                        v2Options);
+                        v2Options,
+                        v2Diag);
 
                     if (signal is not null)
                     {
@@ -204,6 +215,11 @@ public sealed class LiquidityAnalysisService
                             signal.SectorConfirmed = false;
 
                         RescoreV2Sector(signal);
+                        if (signal.QualityScore < LiquidityV2Evaluator.MinQualityScore)
+                        {
+                            v2Diag.Reject("bar_score_below_floor_after_sector");
+                            signal = null;
+                        }
                     }
                 }
                 else
@@ -211,7 +227,8 @@ public sealed class LiquidityAnalysisService
                     signal = TryEvaluate(
                         userId, runId, asOf, token, bars1h, bars4h, daily,
                         ltp > 0 ? ltp : null,
-                        ruleset);
+                        ruleset,
+                        actionableOnly: true);
                 }
 
                 if (signal is null)
@@ -224,6 +241,8 @@ public sealed class LiquidityAnalysisService
                         token.InstrumentId, signal.Side, asOf, openOutcomes, out var flipReason))
                 {
                     skippedFlip++;
+                    if (ruleset == "v2")
+                        v2Diag.Reject("flip_guard");
                     _logger.LogInformation(
                         "Liquidity ({Ruleset}) skip {Symbol}: {Reason}",
                         ruleset, token.AppSymbol, flipReason);
@@ -244,6 +263,12 @@ public sealed class LiquidityAnalysisService
                 await _portfolio.InsertLiquiditySignalAsync(signal, ct);
                 await _outcomes.OpenFromLiquidityAsync(signal, ruleset, ct);
                 signals++;
+                if (ruleset == "v2")
+                {
+                    v2Diag.Pass("saved");
+                    if (!string.IsNullOrWhiteSpace(signal.EventType))
+                        v2Diag.SavedEvent(signal.EventType);
+                }
             }
 
             stats["scanned"] = scanned;
@@ -253,6 +278,21 @@ public sealed class LiquidityAnalysisService
             stats["noSetup"] = noSetup;
             stats["skippedFlip"] = skippedFlip;
             _ = watchIds; // reserved for future universe narrowing
+
+            if (ruleset == "v2")
+            {
+                foreach (var (stage, count) in v2Diag.Funnel)
+                    stats["v2Funnel_" + stage] = count;
+                foreach (var (gate, count) in v2Diag.Counts)
+                    stats["v2Reject_" + gate] = count;
+                foreach (var (evt, count) in v2Diag.EventCandidates)
+                    stats["v2EventCand_" + evt] = count;
+                foreach (var (evt, count) in v2Diag.EventSaved)
+                    stats["v2EventSaved_" + evt] = count;
+                _logger.LogInformation("Liquidity V2 funnel: {Funnel}", v2Diag.DescribeFunnel());
+                _logger.LogInformation("Liquidity V2 events: {Events}", v2Diag.DescribeEvents());
+                _logger.LogInformation("Liquidity V2 rejections: {Rejections}", v2Diag.DescribeRejects());
+            }
 
             await _portfolio.CompleteLiquidityAnalysisRunAsync(runId, "succeeded", null, stats, ct);
             _logger.LogInformation(
@@ -445,7 +485,7 @@ public sealed class LiquidityAnalysisService
             classic = null;
         }
 
-        var sweep = Detect4hSweep(bars4h, daily, maxBars: 4);
+        var sweep = Detect4hSweep(bars4h, daily, maxBars: SweepMaxBars);
         var nearest = NearestZone(mark, zonesInternal);
         var eval = new LiquidityInstrumentEval
         {
@@ -519,18 +559,23 @@ public sealed class LiquidityAnalysisService
         List<Ohlcv> bars4hNewestFirst,
         List<MarketBarRow> dailyNewestFirst,
         decimal? livePrice,
-        string ruleset = "classic")
+        string ruleset = "classic",
+        bool actionableOnly = false)
     {
         var fresh = ruleset.Trim().ToLowerInvariant() == "fresh";
-        var confirmWindow = fresh ? 4 : 10;
+        var confirmWindow = fresh ? FreshConfirmWindow : ClassicConfirmWindow;
 
-        // Look back a few 4H bars so weekend / late-session still finds recent sweeps.
-        var sweep = Detect4hSweep(bars4hNewestFirst, dailyNewestFirst, maxBars: 4);
+        // Look back several 4H bars so setups that confirm 2–4 days after the sweep still qualify.
+        var sweep = Detect4hSweep(bars4hNewestFirst, dailyNewestFirst, maxBars: SweepMaxBars);
         if (sweep is null)
             return null;
 
         for (var i = 0; i < Math.Min(confirmWindow, bars1hNewestFirst.Count - 2); i++)
         {
+            // Live: ignore stale confirms from many bars ago.
+            if (actionableOnly && i > 3)
+                break;
+
             var bar = bars1hNewestFirst[i];
             if (bar.BarTime < sweep.BarTime)
                 continue;
@@ -548,8 +593,8 @@ public sealed class LiquidityAnalysisService
 
             var buyBreak = bar.High > last2High;
             var sellBreak = bar.Low < last2Low;
-            var buyImminent = !buyBreak && price >= last2High * (1m - ImminentMargin);
-            var sellImminent = !sellBreak && price <= last2Low * (1m + ImminentMargin);
+            var buyImminent = !buyBreak && price >= last2High * (1m - ImminentMargin) && price < last2High;
+            var sellImminent = !sellBreak && price <= last2Low * (1m + ImminentMargin) && price > last2Low;
 
             string? side = null;
             if (sweep.Side == SignalSides.Buy && (buyBreak || buyImminent))
@@ -579,12 +624,17 @@ public sealed class LiquidityAnalysisService
             var zones = BuildZones(bars4hNewestFirst, dailyNewestFirst, entry);
             var targets = PickStructureTargets(side, entry, sl, zones);
 
-            if (fresh && targets.Count > 0)
+            if ((fresh || actionableOnly) && targets.Count > 0)
             {
                 var t1 = targets[0];
-                var mark = price;
+                var mark = actionableOnly
+                    ? (livePrice is > 0 ? livePrice.Value : bars1hNewestFirst[0].Close)
+                    : price;
                 var t1Already = side == SignalSides.Buy ? mark >= t1 : mark <= t1;
                 if (t1Already)
+                    continue;
+
+                if (actionableOnly && !IsLiveEntryStillOpen(side, entry, t1, mark))
                     continue;
 
                 var staleAfterConfirm = false;
@@ -641,6 +691,28 @@ public sealed class LiquidityAnalysisService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// True when live mark is still a takeable entry: T1 not tagged and price not extended past entry.
+    /// Buy: mark &lt; T1 and mark within ~1.5% above entry (or still below entry).
+    /// </summary>
+    internal static bool IsLiveEntryStillOpen(string side, decimal entry, decimal t1, decimal mark)
+    {
+        if (entry <= 0)
+            return false;
+
+        const decimal nearEntryPct = 0.025m;
+        if (side == SignalSides.Buy)
+        {
+            if (mark >= t1)
+                return false;
+            return mark <= entry * (1m + nearEntryPct);
+        }
+
+        if (mark <= t1)
+            return false;
+        return mark >= entry * (1m - nearEntryPct);
     }
 
     /// <summary>
@@ -730,12 +802,13 @@ public sealed class LiquidityAnalysisService
         }
 
         if (history.Count < 10)
-            return (current, 0, false);
+            return (current, 0, current >= RvolFloor);
 
         history.Sort();
         var rank = history.Count(h => h <= (double)current);
         var pctile = rank / (double)history.Count;
-        var ok = current >= RvolFloor && pctile >= RvolPercentileGate;
+        // Percentile kept for display/scoring only — Level-1 gate is RVOL floor alone.
+        var ok = current >= RvolFloor;
         return (current, pctile, ok);
     }
 
@@ -750,13 +823,27 @@ public sealed class LiquidityAnalysisService
             : pos <= (1m - StrongClosePct);
     }
 
+    /// <summary>Zone detection knobs. Classic/fresh use <see cref="Classic"/>; V2 passes looser equal-tol / round steps.</summary>
+    internal sealed record ZoneOptions(
+        decimal EqualTolPct = 0.0015m,
+        int SwingLookback = 8,
+        decimal[]? RoundSteps = null)
+    {
+        public static ZoneOptions Classic { get; } = new();
+        public static ZoneOptions V2 { get; } = new(
+            EqualTolPct: 0.0025m,
+            SwingLookback: 8,
+            RoundSteps: new[] { 25m, 50m, 100m, 250m, 500m, 1000m });
+    }
+
     internal sealed record SweepResult(
         string Side, string ZoneType, decimal ZonePrice,
         decimal CandleHigh, decimal CandleLow, DateTimeOffset BarTime);
 
     internal static SweepResult? Detect4hSweep(
-        List<Ohlcv> bars4h, List<MarketBarRow> daily, int maxBars = 4)
+        List<Ohlcv> bars4h, List<MarketBarRow> daily, int maxBars = 8, ZoneOptions? zoneOptions = null)
     {
+        zoneOptions ??= ZoneOptions.Classic;
         SweepResult? best = null;
         var limit = Math.Min(maxBars, bars4h.Count);
         for (var ci = 0; ci < limit; ci++)
@@ -764,7 +851,7 @@ public sealed class LiquidityAnalysisService
             var candle = bars4h[ci];
             // Zones from structure before this candle
             var prior = bars4h.Skip(ci + 1).ToList();
-            var zones = BuildZones(prior, daily, candle.Close);
+            var zones = BuildZones(prior, daily, candle.Close, zoneOptions);
 
             foreach (var z in zones.Where(z => z.IsSupportLike))
             {
@@ -809,39 +896,93 @@ public sealed class LiquidityAnalysisService
         "pdl" or "pdh" => 2,
         "pwl" or "pwh" => 3,
         "round" => 4,
+        "cluster" => 2,
+        "internal_high_4h" or "internal_low_4h" => 6,
+        "internal_high_1h" or "internal_low_1h" => 7,
         _ => 5
     };
 
     internal sealed record Zone(string Type, decimal Price, int Priority, bool IsSupportLike, bool IsResistanceLike);
 
-    internal static List<Zone> BuildZones(List<Ohlcv> bars4hNewestFirst, List<MarketBarRow> dailyNewestFirst, decimal refPrice)
+    internal sealed record ZoneCluster(
+        string Side, decimal MidPrice, decimal Low, decimal High, int MemberCount, string[] MemberTypes);
+
+    /// <summary>
+    /// V2 liquidity event: actionable reclaim/event time may differ from the original sweep candle.
+    /// </summary>
+    internal sealed record LiquidityEvent(
+        string EventType,
+        string Side,
+        string ZoneType,
+        decimal ZonePrice,
+        decimal CandleHigh,
+        decimal CandleLow,
+        DateTimeOffset EventTime,
+        DateTimeOffset SweepTime,
+        int SweepCount,
+        int ClusterSize,
+        string[] ZoneTags,
+        decimal Depth);
+
+    internal static List<Zone> BuildZones(
+        List<Ohlcv> bars4hNewestFirst,
+        List<MarketBarRow> dailyNewestFirst,
+        decimal refPrice,
+        ZoneOptions? zoneOptions = null,
+        DateOnly? asOfDate = null)
     {
+        zoneOptions ??= ZoneOptions.Classic;
+        var equalTol = zoneOptions.EqualTolPct;
+        var roundSteps = zoneOptions.RoundSteps ?? new[] { 50m, 100m, 500m, 1000m };
         var zones = new List<Zone>();
 
-        if (dailyNewestFirst.Count >= 2)
+        // Classic path keeps legacy indexing: [0]=latest/[1]=prior session.
+        // V2 as-of path uses only bars strictly before the event candle's IST date.
+        if (asOfDate is DateOnly asOf)
         {
-            var prev = dailyNewestFirst[1];
-            zones.Add(new Zone("pdh", prev.High, 2, false, true));
-            zones.Add(new Zone("pdl", prev.Low, 2, true, false));
+            var daily = dailyNewestFirst
+                .Where(d => d.TradeDate < asOf)
+                .OrderByDescending(d => d.TradeDate)
+                .ToList();
+            if (daily.Count >= 1)
+            {
+                var prev = daily[0];
+                zones.Add(new Zone("pdh", prev.High, 2, false, true));
+                zones.Add(new Zone("pdl", prev.Low, 2, true, false));
+            }
+            if (daily.Count >= 5)
+            {
+                var week = daily.Take(5).ToList();
+                zones.Add(new Zone("pwh", week.Max(b => b.High), 3, false, true));
+                zones.Add(new Zone("pwl", week.Min(b => b.Low), 3, true, false));
+            }
+        }
+        else
+        {
+            if (dailyNewestFirst.Count >= 2)
+            {
+                var prev = dailyNewestFirst[1];
+                zones.Add(new Zone("pdh", prev.High, 2, false, true));
+                zones.Add(new Zone("pdl", prev.Low, 2, true, false));
+            }
+            if (dailyNewestFirst.Count >= 6)
+            {
+                var week = dailyNewestFirst.Skip(1).Take(5).ToList();
+                zones.Add(new Zone("pwh", week.Max(b => b.High), 3, false, true));
+                zones.Add(new Zone("pwl", week.Min(b => b.Low), 3, true, false));
+            }
         }
 
-        if (dailyNewestFirst.Count >= 6)
-        {
-            var week = dailyNewestFirst.Skip(1).Take(5).ToList();
-            zones.Add(new Zone("pwh", week.Max(b => b.High), 3, false, true));
-            zones.Add(new Zone("pwl", week.Min(b => b.Low), 3, true, false));
-        }
-
-        var swings = FindSwings(bars4hNewestFirst, lookback: 12);
+        var swings = FindSwings(bars4hNewestFirst, lookback: zoneOptions.SwingLookback);
         foreach (var h in swings.Highs)
             zones.Add(new Zone("swing_high", h, 1, false, true));
         foreach (var l in swings.Lows)
             zones.Add(new Zone("swing_low", l, 1, true, false));
 
-        AddEqualLevels(zones, swings.Highs, "equal_high", support: false);
-        AddEqualLevels(zones, swings.Lows, "equal_low", support: true);
+        AddEqualLevels(zones, swings.Highs, "equal_high", support: false, equalTol);
+        AddEqualLevels(zones, swings.Lows, "equal_low", support: true, equalTol);
 
-        foreach (var step in new[] { 50m, 100m, 500m, 1000m })
+        foreach (var step in roundSteps)
         {
             if (refPrice < step * 0.5m)
                 continue;
@@ -860,7 +1001,105 @@ public sealed class LiquidityAnalysisService
             .ToList();
     }
 
-    private static void AddEqualLevels(List<Zone> zones, List<decimal> levels, string type, bool support)
+    /// <summary>V2-only: major/external zones plus deduped internal 4H/1H swings.</summary>
+    internal static List<Zone> BuildV2Zones(
+        List<Ohlcv> bars4hNewestFirst,
+        List<MarketIntradayBarRow> bars1hNewestFirst,
+        List<MarketBarRow> dailyNewestFirst,
+        decimal refPrice,
+        DateOnly asOfDate)
+    {
+        var opts = ZoneOptions.V2;
+        var zones = BuildZones(bars4hNewestFirst, dailyNewestFirst, refPrice, opts, asOfDate);
+
+        // Internal 4H fractals on a deeper window, excluding levels already near external/major.
+        var deep4h = FindSwings(bars4hNewestFirst, lookback: 24);
+        AddInternalIfNovel(zones, deep4h.Highs, "internal_high_4h", support: false, opts.EqualTolPct);
+        AddInternalIfNovel(zones, deep4h.Lows, "internal_low_4h", support: true, opts.EqualTolPct);
+
+        // Internal 1H fractals (~3 sessions).
+        var bars1hOhlcv = bars1hNewestFirst
+            .Take(24)
+            .Select(b => new Ohlcv(b.BarTime, b.Open, b.High, b.Low, b.Close, b.Volume))
+            .ToList();
+        var deep1h = FindSwings(bars1hOhlcv, lookback: 24);
+        AddInternalIfNovel(zones, deep1h.Highs, "internal_high_1h", support: false, opts.EqualTolPct);
+        AddInternalIfNovel(zones, deep1h.Lows, "internal_low_1h", support: true, opts.EqualTolPct);
+
+        return zones
+            .GroupBy(z => (z.Type, Math.Round(z.Price, 2)))
+            .Select(g => g.OrderBy(z => z.Priority).First())
+            .ToList();
+    }
+
+    private static void AddInternalIfNovel(
+        List<Zone> zones, List<decimal> levels, string type, bool support, decimal equalTolPct)
+    {
+        foreach (var level in levels.Where(p => p > 0))
+        {
+            var nearExisting = zones.Any(z =>
+                z.Price > 0 && Math.Abs(z.Price - level) / ((z.Price + level) / 2m) <= equalTolPct);
+            if (nearExisting)
+                continue;
+            zones.Add(new Zone(type, level, ZonePriority(type), support, !support));
+        }
+    }
+
+    /// <summary>Same-side zone clusters (midpoint + outer band). Support and resistance separately.</summary>
+    internal static List<ZoneCluster> BuildClusters(List<Zone> zones, decimal clusterTolPct = 0.004m)
+    {
+        var clusters = new List<ZoneCluster>();
+        foreach (var support in new[] { true, false })
+        {
+            var pool = zones
+                .Where(z => support ? z.IsSupportLike : z.IsResistanceLike)
+                .OrderBy(z => z.Price)
+                .ToList();
+            if (pool.Count < 2)
+                continue;
+
+            var used = new bool[pool.Count];
+            for (var i = 0; i < pool.Count; i++)
+            {
+                if (used[i]) continue;
+                var members = new List<Zone> { pool[i] };
+                used[i] = true;
+                for (var j = i + 1; j < pool.Count; j++)
+                {
+                    if (used[j]) continue;
+                    var mid = (pool[i].Price + pool[j].Price) / 2m;
+                    if (mid <= 0) continue;
+                    if (Math.Abs(pool[i].Price - pool[j].Price) / mid <= clusterTolPct)
+                    {
+                        // Also require near any current member of the growing cluster.
+                        var near = members.Any(m =>
+                            Math.Abs(m.Price - pool[j].Price) / ((m.Price + pool[j].Price) / 2m) <= clusterTolPct);
+                        if (!near) continue;
+                        members.Add(pool[j]);
+                        used[j] = true;
+                    }
+                }
+
+                if (members.Count < 2)
+                    continue;
+
+                var lo = members.Min(m => m.Price);
+                var hi = members.Max(m => m.Price);
+                clusters.Add(new ZoneCluster(
+                    support ? SignalSides.Buy : SignalSides.Sell,
+                    (lo + hi) / 2m,
+                    lo,
+                    hi,
+                    members.Count,
+                    members.Select(m => m.Type).Distinct().ToArray()));
+            }
+        }
+
+        return clusters;
+    }
+
+    private static void AddEqualLevels(
+        List<Zone> zones, List<decimal> levels, string type, bool support, decimal equalTolPct)
     {
         for (var i = 0; i < levels.Count; i++)
         for (var j = i + 1; j < levels.Count; j++)
@@ -869,7 +1108,7 @@ public sealed class LiquidityAnalysisService
             var b = levels[j];
             if (a <= 0 || b <= 0)
                 continue;
-            if (Math.Abs(a - b) / ((a + b) / 2m) <= EqualTolPct)
+            if (Math.Abs(a - b) / ((a + b) / 2m) <= equalTolPct)
             {
                 var mid = (a + b) / 2m;
                 zones.Add(new Zone(type, mid, 0, support, !support));

@@ -261,7 +261,8 @@ public sealed class BacktestService
 
         var notes = new List<BacktestNoteRow>();
         var runId = Guid.Empty;
-        var step = 2; // evaluate every 2 hours to keep runtime reasonable
+        // V2 evaluates every hour so delayed reclaims are not skipped.
+        var step = ruleset == "v2" ? 1 : 2;
         var minIdx = 50;
         var dailyTake = ruleset == "v2" ? 80 : 15;
 
@@ -291,7 +292,12 @@ public sealed class BacktestService
                     niftyDailyNewestFirst: null,
                     options: new LiquidityV2Evaluator.Options());
                 if (signal is not null)
+                {
                     signal.SectorConfirmed = EvalSectorConfirmed(sectorBars, signal.Side, asOfDate);
+                    RescoreV2SectorForBacktest(signal);
+                    if (signal.QualityScore < LiquidityV2Evaluator.MinQualityScore)
+                        signal = null;
+                }
             }
             else
             {
@@ -332,10 +338,13 @@ public sealed class BacktestService
                 signal.Side, signal.EntryPrice, signal.InitialStopLoss,
                 signal.TargetT1, signal.TargetT2, signal.TargetT3, forward);
 
-            notes.Add(ToNote(userId, token, strategy, signal.Side, asOfDate,
+            var note = ToNote(userId, token, strategy, signal.Side, asOfDate,
                 signal.EntryPrice, signal.InitialStopLoss,
                 signal.TargetT1, signal.TargetT2, signal.TargetT3, outcome,
-                EvalSectorConfirmed(sectorBars, signal.Side, asOfDate)));
+                signal.SectorConfirmed);
+            if (ruleset == "v2" && !string.IsNullOrWhiteSpace(signal.EventType))
+                note.Notes = $"auto:1y event={signal.EventType} score={signal.QualityScore}";
+            notes.Add(note);
         }
 
         return notes;
@@ -667,6 +676,30 @@ public sealed class BacktestService
             Source = "auto",
             SectorConfirmed = sectorConfirmed,
         };
+    }
+
+    /// <summary>Mirror live V2 sector rescoring so backtest floor matches RunAsync.</summary>
+    private static void RescoreV2SectorForBacktest(LiquiditySignalRow signal)
+    {
+        var reasons = signal.ScoreReasons?.ToList() ?? new List<string>();
+        var hasSector = reasons.Any(r => r.Contains("sector", StringComparison.OrdinalIgnoreCase));
+        if (signal.SectorConfirmed && !hasSector)
+        {
+            signal.QualityScore += 10;
+            reasons.Add("sector +10");
+        }
+        else if (!signal.SectorConfirmed && hasSector)
+        {
+            signal.QualityScore = Math.Max(0, signal.QualityScore - 10);
+            reasons.RemoveAll(r => r.Contains("sector", StringComparison.OrdinalIgnoreCase));
+        }
+
+        signal.ScoreReasons = reasons.ToArray();
+        signal.ConfidenceRating = signal.QualityScore >= 92 ? "A+"
+            : signal.QualityScore >= 84 ? "A"
+            : signal.QualityScore >= 72 ? "B"
+            : signal.QualityScore >= 58 ? "C"
+            : "D";
     }
 
     /// <summary>True when planned T1 was already traded on the signal bar (not actionable).</summary>

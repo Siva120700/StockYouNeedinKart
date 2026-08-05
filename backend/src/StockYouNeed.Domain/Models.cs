@@ -143,6 +143,11 @@ public sealed class LiquiditySignalRow
     public decimal? DistancePct { get; set; }
     public string[] ZoneTags { get; set; } = Array.Empty<string>();
     public string TimeframeContext { get; set; } = "4h_sweep+1h_confirm";
+    /// <summary>
+    /// V2 event taxonomy: external_sweep | internal_liquidity | liquidity_cluster |
+    /// delayed_reclaim | multi_sweep. Null for classic/fresh.
+    /// </summary>
+    public string? EventType { get; set; }
     public int QualityScore { get; set; }
     public string ConfidenceRating { get; set; } = "";
     public string? SweepStrength { get; set; }

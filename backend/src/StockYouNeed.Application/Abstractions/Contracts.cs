@@ -180,6 +180,17 @@ public interface IBacktestRepository
 
     Task<bool> DeleteNoteAsync(Guid userId, Guid noteId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Bulk-delete backtest rows for the user. When <paramref name="strategies"/> is null/empty,
+    /// all strategies are cleared. When <paramref name="autoOnly"/> is true, only
+    /// <c>backtest_auto_notes</c> are removed (manual notes kept).
+    /// </summary>
+    Task<int> DeleteBacktestsAsync(
+        Guid userId,
+        IReadOnlyList<string>? strategies,
+        bool autoOnly = true,
+        CancellationToken ct = default);
+
     Task DeleteAutoNotesAsync(Guid userId, Guid instrumentId, string strategy, CancellationToken ct = default);
 
     Task InsertAutoNotesAsync(IReadOnlyList<BacktestNoteRow> notes, CancellationToken ct = default);

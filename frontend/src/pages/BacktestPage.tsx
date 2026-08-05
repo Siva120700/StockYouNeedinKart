@@ -4,18 +4,22 @@ import {
   Autocomplete,
   Box,
   Button,
+  Checkbox,
   FormControl,
   FormControlLabel,
   InputLabel,
   LinearProgress,
+  ListItemText,
   MenuItem,
+  OutlinedInput,
   Select,
+  type SelectChangeEvent,
   Stack as MuiStack,
   Switch,
   TextField,
   Typography,
 } from "@mui/material";
-import { FloppyDisk, FilePdf, Play, Stop } from "@phosphor-icons/react";
+import { FloppyDisk, FilePdf, Play, Stop, Trash } from "@phosphor-icons/react";
 import { ActionFactory, DataFactory } from "../api/factories";
 import type {
   BacktestNoteInput,
@@ -33,7 +37,67 @@ import {
   type ExportColumn,
 } from "../utils/exportTable";
 
-type StrategyFilter = "all" | "signals" | "liquidity" | "liquidity_fresh" | "liquidity_v2" | "confluence" | "trade_score" | "breakout";
+const ALL_BACKTEST_STRATEGIES = [
+  "signals",
+  "liquidity",
+  "liquidity_fresh",
+  "liquidity_v2",
+  "confluence",
+  "trade_score",
+  "breakout",
+] as const;
+
+type BacktestStrategy = (typeof ALL_BACKTEST_STRATEGIES)[number];
+
+const STRATEGY_STORAGE_KEY = "backtest.strategyFilter";
+
+function isBacktestStrategy(value: string): value is BacktestStrategy {
+  return (ALL_BACKTEST_STRATEGIES as readonly string[]).includes(value);
+}
+
+function parseStoredStrategies(raw: string | null): BacktestStrategy[] {
+  if (!raw) return [...ALL_BACKTEST_STRATEGIES];
+  if (raw === "all") return [...ALL_BACKTEST_STRATEGIES];
+  if (isBacktestStrategy(raw)) return [raw];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      // An explicitly stored empty array means the user cleared the filter.
+      return parsed.filter(
+        (v): v is BacktestStrategy => typeof v === "string" && isBacktestStrategy(v),
+      );
+    }
+  } catch {
+    /* ignore */
+  }
+  return [...ALL_BACKTEST_STRATEGIES];
+}
+
+function strategyLabel(strategy: string | null | undefined): string {
+  if (strategy === "confluence") return "Confluence";
+  if (strategy === "trade_score") return "Trade Score";
+  if (strategy === "breakout") return "Breakout";
+  if (strategy === "liquidity_fresh") return "Liquidity Fresh";
+  if (strategy === "liquidity_v2") return "Liquidity V2";
+  if (strategy === "liquidity") return "Liquidity";
+  if (strategy === "signals") return "Signals";
+  return strategy ?? "";
+}
+
+function isAllStrategies(selected: readonly BacktestStrategy[]): boolean {
+  return selected.length === ALL_BACKTEST_STRATEGIES.length;
+}
+
+function strategiesForFilter(selected: readonly BacktestStrategy[]): readonly BacktestStrategy[] {
+  return isAllStrategies(selected) ? ALL_BACKTEST_STRATEGIES : selected;
+}
+
+function strategySelectionLabel(selected: readonly BacktestStrategy[]): string {
+  if (selected.length === 0) return "No strategies";
+  if (isAllStrategies(selected)) return "All strategies";
+  if (selected.length === 1) return strategyLabel(selected[0]);
+  return `${selected.length} strategies`;
+}
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -63,27 +127,8 @@ function emptyForm(instrumentId: string): BacktestNoteInput {
   };
 }
 
-function strategyLabel(strategy: string | null | undefined): string {
-  if (strategy === "confluence") return "Confluence";
-  if (strategy === "trade_score") return "Trade Score";
-  if (strategy === "breakout") return "Breakout";
-  if (strategy === "liquidity_fresh") return "Liquidity Fresh";
-  if (strategy === "liquidity_v2") return "Liquidity V2";
-  if (strategy === "liquidity") return "Liquidity";
-  if (strategy === "signals") return "Signals";
-  return strategy ?? "";
-}
-
 function summaryRowId(row: BacktestSymbolSummary): string {
   return `${row.instrumentId}-${row.strategyFilter ?? "unknown"}`;
-}
-
-type BacktestStrategy = "signals" | "liquidity" | "liquidity_fresh" | "liquidity_v2" | "confluence" | "trade_score" | "breakout";
-
-function strategiesForFilter(filter: StrategyFilter): readonly BacktestStrategy[] {
-  return filter === "all"
-    ? (["signals", "liquidity", "liquidity_fresh", "liquidity_v2", "confluence", "trade_score", "breakout"] as const)
-    : ([filter] as const);
 }
 
 function isStockCompleted(
@@ -273,25 +318,34 @@ export default function BacktestPage() {
 
   const [universe, setUniverse] = useState<UniverseInstrument[]>([]);
   const [runTarget, setRunTarget] = useState<UniverseInstrument | null>(null);
-  const [strategyFilter, setStrategyFilter] = useState<StrategyFilter>(() => {
-    const saved = sessionStorage.getItem("backtest.strategyFilter");
-    return saved === "signals" ||
-      saved === "liquidity" ||
-      saved === "liquidity_fresh" ||
-      saved === "liquidity_v2" ||
-      saved === "confluence" ||
-      saved === "trade_score" ||
-      saved === "breakout" ||
-      saved === "all"
-      ? saved
-      : "all";
-  });
+  const [strategyFilter, setStrategyFilter] = useState<BacktestStrategy[]>(() =>
+    parseStoredStrategies(sessionStorage.getItem(STRATEGY_STORAGE_KEY)),
+  );
+
+  function persistStrategyFilter(next: BacktestStrategy[]) {
+    setStrategyFilter(next);
+    sessionStorage.setItem(STRATEGY_STORAGE_KEY, JSON.stringify(next));
+  }
+
+  function onStrategyFilterChange(event: SelectChangeEvent<string[]>) {
+    const raw = event.target.value;
+    const value = typeof raw === "string" ? raw.split(",") : raw;
+    if (value.includes("all")) {
+      // "All" toggles: clear when everything is already selected.
+      persistStrategyFilter(
+        isAllStrategies(strategyFilter) ? [] : [...ALL_BACKTEST_STRATEGIES],
+      );
+      return;
+    }
+    persistStrategyFilter(value.filter(isBacktestStrategy));
+  }
   const [summaries, setSummaries] = useState<BacktestSymbolSummary[]>([]);
   const [form, setForm] = useState<BacktestNoteInput>(emptyForm(""));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [runningAll, setRunningAll] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [skipCompleted, setSkipCompleted] = useState(true);
   const [riskRewardCheck, setRiskRewardCheck] = useState(() => {
     const saved = sessionStorage.getItem("backtest.riskRewardCheck");
@@ -309,6 +363,7 @@ export default function BacktestPage() {
     failed: number;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [showManualForm, setShowManualForm] = useState(false);
   const [search, setSearch] = useState("");
   const [visibleRows, setVisibleRows] = useState<BacktestSymbolSummary[]>([]);
@@ -318,7 +373,8 @@ export default function BacktestPage() {
     setIsSyncing(true);
     setError(null);
     try {
-      const strat = strategyFilter === "all" ? null : strategyFilter;
+      const selected = strategiesForFilter(strategyFilter);
+      const strat = selected.length === 1 ? selected[0]! : null;
       const minRr = riskRewardCheck ? 1 : null;
       const rows = await DataFactory.backtestSummaries(strat, minRr, sectorCheck || null);
       setSummaries(rows);
@@ -358,7 +414,7 @@ export default function BacktestPage() {
   }, [loadSummaries]);
 
   async function onRunHistorical() {
-    if (!runTarget) return;
+    if (!runTarget || strategyFilter.length === 0) return;
     setRunning(true);
     setError(null);
     setIsSyncing(true);
@@ -381,8 +437,37 @@ export default function BacktestPage() {
     cancelBatchRef.current = true;
   }
 
+  async function onClearAutoBacktests() {
+    if (clearing || running || runningAll || strategyFilter.length === 0) return;
+    const strategies = [...strategiesForFilter(strategyFilter)];
+    const label = strategySelectionLabel(strategyFilter);
+    const ok = window.confirm(
+      `Delete auto-generated backtest results for ${label}?\n\nManual notes are kept. Re-run 1Y afterward to rebuild from the current rules.`,
+    );
+    if (!ok) return;
+
+    setClearing(true);
+    setError(null);
+    setInfo(null);
+    setIsSyncing(true);
+    try {
+      const deleted = await ActionFactory.deleteBacktests(strategies, true);
+      await loadSummaries();
+      if (deleted === 0) {
+        setInfo("No auto backtest rows to delete for the selected strategies.");
+      } else {
+        setInfo(`Cleared ${deleted} auto backtest row${deleted === 1 ? "" : "s"} for ${label}.`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setClearing(false);
+      setIsSyncing(false);
+    }
+  }
+
   async function onRunAllHistorical() {
-    if (universe.length === 0 || runningAll) return;
+    if (universe.length === 0 || runningAll || strategyFilter.length === 0) return;
     const strategies = strategiesForFilter(strategyFilter);
     const queue = universe.filter(
       (stock) => !skipCompleted || !isStockCompleted(stock.id, strategies, summaries),
@@ -469,8 +554,11 @@ export default function BacktestPage() {
   }
 
   const tableRows = useMemo(() => {
-    if (strategyFilter === "all") return summaries;
-    return summaries.filter((r) => r.strategyFilter === strategyFilter);
+    if (isAllStrategies(strategyFilter)) return summaries;
+    const selected = new Set(strategyFilter);
+    return summaries.filter(
+      (r) => r.strategyFilter != null && selected.has(r.strategyFilter as BacktestStrategy),
+    );
   }, [summaries, strategyFilter]);
 
   const onVisibleRowsChange = useCallback((rows: BacktestSymbolSummary[]) => {
@@ -480,10 +568,7 @@ export default function BacktestPage() {
   const stats = useMemo(() => aggregateStats(visibleRows), [visibleRows]);
 
   function onExportPdf() {
-    const filterLabel =
-      strategyFilter === "all"
-        ? "All strategies"
-        : strategyLabel(strategyFilter);
+    const filterLabel = strategySelectionLabel(strategyFilter);
     downloadPdfTable({
       title: `Backtest 1Y · ${filterLabel}${riskRewardCheck ? " · R:R ≥ 1" : ""}${sectorCheck ? " · Sector" : ""}`,
       fileName: exportStamp("backtest", "pdf"),
@@ -525,6 +610,7 @@ export default function BacktestPage() {
     >
       <Box sx={{ flexShrink: 0 }}>
         {error ? <Alert severity="error">{error}</Alert> : null}
+        {info ? <Alert severity="success" onClose={() => setInfo(null)}>{info}</Alert> : null}
 
         {batchProgress ? (
           <Box sx={{ mt: error ? 2 : 0 }}>
@@ -557,25 +643,33 @@ export default function BacktestPage() {
           flexWrap="wrap"
           sx={{ mt: batchProgress ? 2 : 2 }}
         >
-          <FormControl size="small" sx={{ minWidth: 140 }} disabled={runningAll}>
+          <FormControl size="small" sx={{ minWidth: 180 }} disabled={runningAll}>
             <InputLabel>Strategy</InputLabel>
             <Select
+              multiple
               label="Strategy"
               value={strategyFilter}
-              onChange={(e) => {
-                const next = e.target.value as StrategyFilter;
-                setStrategyFilter(next);
-                sessionStorage.setItem("backtest.strategyFilter", next);
-              }}
+              onChange={onStrategyFilterChange}
+              input={<OutlinedInput label="Strategy" />}
+              renderValue={(selected) => strategySelectionLabel(selected as BacktestStrategy[])}
             >
-              <MenuItem value="all">All</MenuItem>
-              <MenuItem value="signals">Signals</MenuItem>
-              <MenuItem value="liquidity">Liquidity</MenuItem>
-              <MenuItem value="liquidity_fresh">Liquidity Fresh</MenuItem>
-              <MenuItem value="liquidity_v2">Liquidity V2</MenuItem>
-              <MenuItem value="confluence">Confluence</MenuItem>
-              <MenuItem value="breakout">Breakout</MenuItem>
-              <MenuItem value="trade_score">Trade Score</MenuItem>
+              <MenuItem value="all">
+                <Checkbox
+                  size="small"
+                  checked={isAllStrategies(strategyFilter)}
+                  indeterminate={
+                    strategyFilter.length > 0 &&
+                    strategyFilter.length < ALL_BACKTEST_STRATEGIES.length
+                  }
+                />
+                <ListItemText primary="All" />
+              </MenuItem>
+              {ALL_BACKTEST_STRATEGIES.map((s) => (
+                <MenuItem key={s} value={s}>
+                  <Checkbox size="small" checked={strategyFilter.includes(s)} />
+                  <ListItemText primary={strategyLabel(s)} />
+                </MenuItem>
+              ))}
             </Select>
           </FormControl>
           <Autocomplete
@@ -595,30 +689,46 @@ export default function BacktestPage() {
           <Button
             size="small"
             variant="contained"
-            disabled={!runTarget || running || runningAll || loading}
+            disabled={
+              !runTarget || running || runningAll || loading || strategyFilter.length === 0
+            }
             startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
             onClick={() => void onRunHistorical()}
           >
             {running
-              ? strategyFilter === "signals"
-                ? "Running 1Y…"
-                : "Running 1Y… (may take a few min)"
-              : strategyFilter === "all"
-                ? "Run 1Y (all strategies)"
-                : `Run 1Y ${strategyLabel(strategyFilter).toLowerCase()}`}
+              ? isAllStrategies(strategyFilter) || strategyFilter.length > 1
+                ? "Running 1Y… (may take a few min)"
+                : "Running 1Y…"
+              : strategyFilter.length === 0
+                ? "Run 1Y (select a strategy)"
+                : isAllStrategies(strategyFilter)
+                  ? "Run 1Y (all strategies)"
+                  : strategyFilter.length === 1
+                    ? `Run 1Y ${strategyLabel(strategyFilter[0]).toLowerCase()}`
+                    : `Run 1Y (${strategyFilter.length} strategies)`}
           </Button>
           <Button
             size="small"
             variant="outlined"
-            disabled={universe.length === 0 || running || runningAll || loading}
+            disabled={
+              universe.length === 0 ||
+              running ||
+              runningAll ||
+              loading ||
+              strategyFilter.length === 0
+            }
             startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
             onClick={() => void onRunAllHistorical()}
           >
             {runningAll
               ? "Running all…"
-              : strategyFilter === "all"
-                ? "Run all 1Y"
-                : `Run all ${strategyLabel(strategyFilter).toLowerCase()} 1Y`}
+              : strategyFilter.length === 0
+                ? "Run all (select a strategy)"
+                : isAllStrategies(strategyFilter)
+                  ? "Run all 1Y"
+                  : strategyFilter.length === 1
+                    ? `Run all ${strategyLabel(strategyFilter[0]).toLowerCase()} 1Y`
+                    : `Run all (${strategyFilter.length} strategies) 1Y`}
           </Button>
           <FormControlLabel
             control={
@@ -671,6 +781,22 @@ export default function BacktestPage() {
             }
             label="Manual note"
           />
+          <Button
+            size="small"
+            variant="outlined"
+            color="warning"
+            disabled={
+              loading ||
+              clearing ||
+              running ||
+              runningAll ||
+              strategyFilter.length === 0
+            }
+            startIcon={<Trash size={DEFAULT_SMALL_ICON_SIZE} />}
+            onClick={() => void onClearAutoBacktests()}
+          >
+            {clearing ? "Clearing…" : "Clear auto results"}
+          </Button>
           <Button
             size="small"
             variant="outlined"

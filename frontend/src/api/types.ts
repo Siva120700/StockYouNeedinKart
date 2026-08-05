@@ -48,6 +48,9 @@ export type LiquiditySignal = {
   nearestZonePrice?: number | null;
   distancePct?: number | null;
   timeframeContext: string;
+  /** V2 event taxonomy; null for classic/fresh. */
+  eventType?: string | null;
+  zoneTags?: string[] | null;
   qualityScore?: number | null;
   confidenceRating?: string | null;
   sweepStrength?: string | null;

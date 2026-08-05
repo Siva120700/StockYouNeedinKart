@@ -325,7 +325,7 @@ export default function SignalsPage() {
         emptyMessage={
           sectorCheck || riskRewardCheck || freshCrossCheck
             ? "No signals match the active filters. Turn filters off, or Run analysis again."
-            : "No signals matched. Click Run analysis."
+            : "No actionable signals (approaching entry, open T1). Click Run analysis."
         }
       />
     </>

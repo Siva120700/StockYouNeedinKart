@@ -394,7 +394,7 @@ public sealed class PortfolioRepository : IPortfolioRepository
               relative_volume, rvol_percentile, rvol_ok, strong_close, sector_confirmed,
               sweep_side, swept_zone_type, swept_zone_price,
               nearest_zone_type, nearest_zone_price, distance_pct,
-              zone_tags, timeframe_context,
+              zone_tags, timeframe_context, event_type,
               quality_score, confidence_rating, sweep_strength, atr14, score_reasons)
             VALUES (
               @Id, @LiquidityRunId, @UserId, @InstrumentId, @Side::signal_side, @AsOfDate,
@@ -402,7 +402,7 @@ public sealed class PortfolioRepository : IPortfolioRepository
               @RelativeVolume, @RvolPercentile, @RvolOk, @StrongClose, @SectorConfirmed,
               @SweepSide, @SweptZoneType, @SweptZonePrice,
               @NearestZoneType, @NearestZonePrice, @DistancePct,
-              @ZoneTags, @TimeframeContext,
+              @ZoneTags, @TimeframeContext, @EventType,
               @QualityScore, @ConfidenceRating, @SweepStrength, @Atr14, @ScoreReasons)
             """;
         using var conn = _db.CreateConnection();
@@ -442,6 +442,7 @@ public sealed class PortfolioRepository : IPortfolioRepository
               s.distance_pct AS DistancePct,
               s.zone_tags AS ZoneTags,
               s.timeframe_context AS TimeframeContext,
+              s.event_type AS EventType,
               s.quality_score AS QualityScore,
               s.confidence_rating AS ConfidenceRating,
               s.sweep_strength AS SweepStrength,
@@ -515,6 +516,7 @@ public sealed class PortfolioRepository : IPortfolioRepository
               s.distance_pct AS DistancePct,
               s.zone_tags AS ZoneTags,
               s.timeframe_context AS TimeframeContext,
+              s.event_type AS EventType,
               s.quality_score AS QualityScore,
               s.confidence_rating AS ConfidenceRating,
               s.sweep_strength AS SweepStrength,
