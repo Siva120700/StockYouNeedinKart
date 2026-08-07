@@ -392,7 +392,7 @@ public sealed class BacktestService
         }
 
         var notes = new List<BacktestNoteRow>();
-        for (var i = 50; i < bars1hChron.Count; i += 2)
+        for (var i = 50; i < bars1hChron.Count; i += 1)
         {
             ct.ThrowIfCancellationRequested();
             var asOfBar = bars1hChron[i];
@@ -402,11 +402,20 @@ public sealed class BacktestService
 
             var asOfDate = DateOnly.FromDateTime(asOfBar.BarTime.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
             var dailyNewest = dailyChron.Where(d => d.TradeDate <= asOfDate)
-                .OrderByDescending(d => d.TradeDate).Take(15).ToList();
+                .OrderByDescending(d => d.TradeDate).Take(80).ToList();
 
-            var liq = LiquidityAnalysisService.TryEvaluate(
-                userId, runId, asOfDate, token, bars1hNewest, bars4h, dailyNewest, null, "fresh");
+            var liq = LiquidityV2Evaluator.TryEvaluate(
+                userId, runId, asOfDate, token, bars1hNewest, bars4h, dailyNewest,
+                livePrice: null,
+                sectorConfirmed: false,
+                niftyDailyNewestFirst: null,
+                options: new LiquidityV2Evaluator.Options());
             if (liq is null) continue;
+
+            liq.SectorConfirmed = EvalSectorConfirmed(sectorBars, liq.Side, asOfDate);
+            RescoreV2SectorForBacktest(liq);
+            if (liq.QualityScore < LiquidityV2Evaluator.MinQualityScore)
+                continue;
 
             var sigMatch = dailySignals
                 .Where(ds => string.Equals(ds.Signal.Side, liq.Side, StringComparison.OrdinalIgnoreCase)
@@ -421,7 +430,6 @@ public sealed class BacktestService
                 continue;
 
             if (!MeetsMinRiskReward(entry, sl, liq.TargetT1)) continue;
-            if (rulesetFreshSkip(liq, asOfBar)) continue;
             if (dedupeRecent(notes, liq.Side, asOfBar)) continue;
             if (IsFlipBlocked(notes, liq.Side, asOfDate)) continue;
 

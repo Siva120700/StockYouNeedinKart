@@ -245,7 +245,8 @@ public sealed class AnalysisRunService
                 livePrices.TryGetValue(instrumentId, out var livePrice);
                 var signal = BreakoutSignalEvaluator.Evaluate(
                     userId, runId, asOf, bars, livePrice > 0 ? livePrice : null,
-                    actionableOnly: true);
+                    actionableOnly: true,
+                    projectPartialSessionVolume: true);
                 if (signal is null)
                 {
                     noSetup++;

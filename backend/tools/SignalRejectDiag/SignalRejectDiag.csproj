@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\StockYouNeed.Application\StockYouNeed.Application.csproj" />
+    <ProjectReference Include="..\..\src\StockYouNeed.Domain\StockYouNeed.Domain.csproj" />
+    <PackageReference Include="Npgsql" Version="8.0.6" />
+  </ItemGroup>
+</Project>

@@ -20,7 +20,7 @@ export const ConfluenceApi = {
 
   async runBothAnalyses(): Promise<void> {
     await ActionFactory.runAnalysis();
-    await ActionFactory.runLiquidityAnalysis("fresh");
+    await ActionFactory.runLiquidityAnalysis("v2");
   },
 
   async openPosition(row: ConfluenceSignal): Promise<string> {

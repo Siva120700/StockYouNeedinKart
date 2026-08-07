@@ -289,18 +289,11 @@ public static class LiquidityV2Evaluator
                 diag?.Pass("confirm_ok");
             }
 
-            // Zone / structure levels only — never invent R-multiple targets.
-            var (t1, t2, t3) = PickV2Targets(side, entry, zones);
+            // Structure targets with a 1.5R minimum distance (risk-ladder fallback).
+            var (t1, t2, t3) = PickV2Targets(side, entry, risk, zones);
 
             // Roll past spent T1 so remaining structure targets stay actionable.
             (t1, t2, t3) = RollPastSpentTargets(side, t1, t2, t3, markPrice, bars1hNewestFirst, i);
-            // Skip micro targets (<0.4%) — promote to next real level.
-            while (t1 is decimal micro
-                   && entry > 0
-                   && Math.Abs(micro - entry) / entry < 0.004m)
-            {
-                (t1, t2, t3) = (t2, t3, null);
-            }
             if (t1 is null)
             {
                 barGate = "bar_no_zone_target";
@@ -1125,20 +1118,65 @@ public static class LiquidityV2Evaluator
     }
 
     /// <summary>
-    /// Targets from liquidity/structure zones/levels only (same picker as Classic).
-    /// Missing slots stay blank — no R-multiple or geometric fill-ins.
+    /// Structure-zone targets with a meaningful minimum distance: T1 must sit at least
+    /// <see cref="MinTargetRiskMultiple"/> × risk from entry so wins are not decorative
+    /// (previously zone targets could land a fraction of 1R away). When no structure level
+    /// is far enough, falls back to a risk-multiple ladder (1.5R / 2.5R / 3.5R).
     /// </summary>
+    internal const decimal MinTargetRiskMultiple = 1.5m;
+
     internal static (decimal? T1, decimal? T2, decimal? T3) PickV2Targets(
         string side,
         decimal entry,
+        decimal risk,
         List<LiquidityAnalysisService.Zone> zones)
     {
-        if (entry <= 0)
+        if (entry <= 0 || risk <= 0)
             return (null, null, null);
 
-        var levels = LiquidityAnalysisService.PickStructureTargets(side, entry, entry, zones);
+        var minDistance = risk * MinTargetRiskMultiple;
+
+        var candidates = side == SignalSides.Buy
+            ? zones
+                .Where(z => z.IsResistanceLike && z.Price >= entry + minDistance)
+                .OrderBy(z => z.Priority)
+                .ThenBy(z => z.Price)
+                .Select(z => z.Price)
+            : zones
+                .Where(z => z.IsSupportLike && z.Price <= entry - minDistance && z.Price > 0)
+                .OrderBy(z => z.Priority)
+                .ThenByDescending(z => z.Price)
+                .Select(z => z.Price);
+
+        var levels = new List<decimal>();
+        foreach (var p in candidates)
+        {
+            if (levels.Any(x => Math.Abs(x - p) / entry < TargetMinDistancePct))
+                continue;
+            levels.Add(p);
+            if (levels.Count >= 3)
+                break;
+        }
+
+        levels = side == SignalSides.Buy
+            ? levels.OrderBy(x => x).ToList()
+            : levels.OrderByDescending(x => x).ToList();
+
+        if (levels.Count == 0)
+        {
+            decimal? LadderAt(decimal multiple)
+            {
+                var price = side == SignalSides.Buy
+                    ? entry + risk * multiple
+                    : entry - risk * multiple;
+                return price > 0 ? price : null;
+            }
+
+            return (LadderAt(1.5m), LadderAt(2.5m), LadderAt(3.5m));
+        }
+
         return (
-            levels.Count > 0 ? levels[0] : null,
+            levels[0],
             levels.Count > 1 ? levels[1] : null,
             levels.Count > 2 ? levels[2] : null);
     }

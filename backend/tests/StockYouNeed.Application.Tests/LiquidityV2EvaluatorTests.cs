@@ -223,9 +223,10 @@ public class LiquidityV2EvaluatorTests
     }
 
     [Fact]
-    public void PickV2Targets_UsesStructureLevelsNotBlind2R()
+    public void PickV2Targets_UsesStructureLevelsWhenFarEnough()
     {
         var entry = 3905m;
+        var risk = 100m; // min T1 distance = 150
         var zones = new List<LiquidityAnalysisService.Zone>
         {
             new("swing_high", 4098.40m, 1, false, true),
@@ -233,7 +234,7 @@ public class LiquidityV2EvaluatorTests
             new("pdh", 4200.00m, 2, false, true),
         };
 
-        var (t1, t2, t3) = LiquidityV2Evaluator.PickV2Targets(SignalSides.Buy, entry, zones);
+        var (t1, t2, t3) = LiquidityV2Evaluator.PickV2Targets(SignalSides.Buy, entry, risk, zones);
 
         Assert.Equal(4098.40m, t1);
         Assert.Equal(4136.00m, t2);
@@ -242,12 +243,30 @@ public class LiquidityV2EvaluatorTests
     }
 
     [Fact]
-    public void PickV2Targets_LeavesBlankWhenNoStructure()
+    public void PickV2Targets_FallsBackToRiskLadderWhenNoStructure()
     {
         var (t1, t2, t3) = LiquidityV2Evaluator.PickV2Targets(
-            SignalSides.Buy, 100m, new List<LiquidityAnalysisService.Zone>());
+            SignalSides.Buy, 100m, risk: 2m, new List<LiquidityAnalysisService.Zone>());
 
-        Assert.Null(t1);
+        Assert.Equal(103m, t1); // 1.5R
+        Assert.Equal(105m, t2); // 2.5R
+        Assert.Equal(107m, t3); // 3.5R
+    }
+
+    [Fact]
+    public void PickV2Targets_SkipsMicroZonesInsideMinRiskDistance()
+    {
+        // Zone at 100.5 is only 0.25R away — decorative. It must be skipped and the
+        // farther zone used as T1.
+        var zones = new List<LiquidityAnalysisService.Zone>
+        {
+            new("swing_high", 100.5m, 1, false, true),
+            new("pdh", 106m, 2, false, true),
+        };
+
+        var (t1, t2, t3) = LiquidityV2Evaluator.PickV2Targets(SignalSides.Buy, 100m, risk: 2m, zones);
+
+        Assert.Equal(106m, t1);
         Assert.Null(t2);
         Assert.Null(t3);
     }
@@ -260,11 +279,28 @@ public class LiquidityV2EvaluatorTests
             new("swing_high", 105m, 1, false, true),
         };
 
-        var (t1, t2, t3) = LiquidityV2Evaluator.PickV2Targets(SignalSides.Buy, 100m, zones);
+        var (t1, t2, t3) = LiquidityV2Evaluator.PickV2Targets(SignalSides.Buy, 100m, risk: 2m, zones);
 
         Assert.Equal(105m, t1);
         Assert.Null(t2);
         Assert.Null(t3);
+    }
+
+    [Fact]
+    public void PickV2Targets_T1AlwaysAtLeastMinRiskMultipleAway()
+    {
+        var entry = 100m;
+        var risk = 3m;
+        var zones = new List<LiquidityAnalysisService.Zone>
+        {
+            new("swing_high", 101m, 1, false, true),
+            new("equal_high", 102m, 1, false, true),
+        };
+
+        var (t1, _, _) = LiquidityV2Evaluator.PickV2Targets(SignalSides.Buy, entry, risk, zones);
+
+        Assert.NotNull(t1);
+        Assert.True(Math.Abs(t1!.Value - entry) >= risk * LiquidityV2Evaluator.MinTargetRiskMultiple);
     }
 
     [Fact]

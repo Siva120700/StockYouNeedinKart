@@ -7,7 +7,8 @@ public static class BreakoutSignalEvaluator
 {
     public static AnalysisSignalRow? Evaluate(
         Guid userId, Guid runId, DateOnly asOf, List<MarketBarRow> barsDesc, decimal? livePrice = null,
-        bool actionableOnly = false)
+        bool actionableOnly = false,
+        bool projectPartialSessionVolume = false)
     {
         var latest = barsDesc[0];
         var prev = barsDesc.Skip(1).Take(2).ToList();
@@ -21,7 +22,8 @@ public static class BreakoutSignalEvaluator
         if (prior3.Count == 0)
             return null;
         var avgVolPrior3 = prior3.Average(b => (double)b.Volume);
-        var volumeOk = latest.Volume >= (long)(avgVolPrior3 * 0.25);
+        var effectiveVolume = EffectiveVolumeForGate(latest.Volume, asOf, projectPartialSessionVolume);
+        var volumeOk = effectiveVolume >= (long)(avgVolPrior3 * 0.25);
 
         const decimal ImminentMargin = 0.01m;
         var ltp = livePrice ?? latest.Close;
@@ -114,10 +116,14 @@ public static class BreakoutSignalEvaluator
         if (t1 is null)
             return null;
 
-        // Still require room to T1 vs stop (skip tiny leftover targets after a wide SL).
+        // Still require a usable stop. Live (actionableOnly) keeps R:R soft — the Signals UI
+        // already has an optional "R:R ≥ 1" filter (off by default). Backtest / non-live keeps
+        // the hard reward ≥ risk gate for quality.
         var risk = Math.Abs(entry - sl);
         var reward = Math.Abs(t1.Value - entry);
-        if (risk <= 0 || reward < risk)
+        if (risk <= 0)
+            return null;
+        if (!actionableOnly && reward < risk)
             return null;
 
         if (actionableOnly
@@ -147,6 +153,42 @@ public static class BreakoutSignalEvaluator
             Last2dHigh = last2High,
             Last2dLow = last2Low
         };
+    }
+
+    /// <summary>
+    /// NSE cash session is 09:15–15:30 IST (375 minutes). During a live partial day,
+    /// scale printed volume to a full-session estimate so the 25%-of-prior-3 gate is fair.
+    /// Completed sessions and historical backtests leave volume unchanged.
+    /// </summary>
+    internal static long EffectiveVolumeForGate(
+        long rawVolume, DateOnly asOf, bool projectPartialSession)
+    {
+        if (!projectPartialSession || rawVolume <= 0)
+            return rawVolume;
+
+        var ist = TimeSpan.FromHours(5.5);
+        var nowIst = DateTimeOffset.UtcNow.ToOffset(ist);
+        var todayIst = DateOnly.FromDateTime(nowIst.DateTime);
+        if (asOf != todayIst)
+            return rawVolume;
+
+        var open = new TimeOnly(9, 15);
+        var close = new TimeOnly(15, 30);
+        var nowTime = TimeOnly.FromDateTime(nowIst.DateTime);
+
+        // Pre-open / after close: use printed volume as-is (no partial session).
+        if (nowTime <= open || nowTime >= close)
+            return rawVolume;
+
+        var elapsed = (nowTime.ToTimeSpan() - open.ToTimeSpan()).TotalMinutes;
+        if (elapsed < 1)
+            elapsed = 1;
+
+        const double sessionMinutes = 375.0; // 09:15 → 15:30
+        var projected = rawVolume * (sessionMinutes / elapsed);
+        if (projected >= long.MaxValue)
+            return long.MaxValue;
+        return (long)Math.Round(projected, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>

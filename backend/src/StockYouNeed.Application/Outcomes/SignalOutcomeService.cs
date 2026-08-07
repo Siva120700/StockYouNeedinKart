@@ -201,8 +201,8 @@ public sealed class SignalOutcomeService
         }
 
         var signals = await _portfolio.GetSignalsAsync(userId, null, ct);
-        var liquidityFresh = await _portfolio.GetLiquiditySignalsAsync(userId, null, "fresh", ct);
-        foreach (var liq in liquidityFresh)
+        var liquidityV2 = await _portfolio.GetLiquiditySignalsAsync(userId, null, "v2", ct);
+        foreach (var liq in liquidityV2)
         {
             var sig = signals.FirstOrDefault(s =>
                 s.InstrumentId == liq.InstrumentId

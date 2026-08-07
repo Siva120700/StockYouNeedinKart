@@ -93,7 +93,7 @@ export default function ConfluencePage() {
         />
         <Button variant="contained" size="small" disabled={running} startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
           onClick={() => void onRun()}>
-          {running ? "Running…" : "Run Signals + Liq Fresh"}
+          {running ? "Running…" : "Run Signals + Liq V2"}
         </Button>
       </Stack>,
     );
@@ -124,11 +124,11 @@ export default function ConfluencePage() {
     <>
       {error ? <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert> : null}
       <Alert severity="info" sx={{ mb: 2 }}>
-        <strong>Confluence</strong> = Signals + Liquidity Fresh overlap only. SL = tighter stop (0.2% entry tolerance).
+        <strong>Confluence</strong> = Signals + Liquidity V2 overlap only. SL = tighter stop (0.2% entry tolerance).
         Separate from Breakout and Trade Score.
       </Alert>
       <ZenTable columns={columns} rows={visible} getRowId={(r) => r.id} loading={loading} enableSearch
-        emptyMessage="No overlap. Run Signals + Liquidity Fresh first." />
+        emptyMessage="No overlap. Run Signals + Liquidity V2 first." />
     </>
   );
 }

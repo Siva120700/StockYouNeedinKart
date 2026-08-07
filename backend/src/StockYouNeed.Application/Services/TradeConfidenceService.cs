@@ -68,7 +68,8 @@ public sealed class TradeConfidenceService
         {
             signal = BreakoutSignalEvaluator.Evaluate(
                 userId, Guid.Empty, asOf, bars, ltp is > 0 ? ltp : null,
-                actionableOnly: true);
+                actionableOnly: true,
+                projectPartialSessionVolume: true);
             if (signal is not null)
                 signal.InstrumentName = instrument.Name;
         }

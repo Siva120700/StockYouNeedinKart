@@ -4,7 +4,7 @@ using StockYouNeed.Domain;
 
 namespace StockYouNeed.Application.Confluence;
 
-/// <summary>Live Signals + Liquidity Fresh overlap — independent of Trade Score and Breakout.</summary>
+/// <summary>Live Signals + Liquidity V2 overlap — independent of Trade Score and Breakout.</summary>
 public sealed class ConfluenceService
 {
     private readonly IPortfolioRepository _portfolio;
@@ -20,7 +20,7 @@ public sealed class ConfluenceService
         Guid userId, CancellationToken ct = default)
     {
         var signals = await _portfolio.GetSignalsAsync(userId, null, ct);
-        var liquidity = await _portfolio.GetLiquiditySignalsAsync(userId, null, "fresh", ct);
+        var liquidity = await _portfolio.GetLiquiditySignalsAsync(userId, null, "v2", ct);
         var rows = new List<ConfluenceSignalRow>();
 
         foreach (var liq in liquidity)

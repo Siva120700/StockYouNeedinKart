@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Alert,
   Autocomplete,
@@ -18,6 +18,11 @@ import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { AnalyzeStockApi } from "./api";
 import { buildNextMoveSections } from "./nextMove";
 import {
+  buildFutureOutlookSections,
+  readUserView,
+  type OutlookSection,
+} from "./outlook";
+import {
   fmt,
   sourceLabel,
   verdictColor,
@@ -33,6 +38,77 @@ function Metric({ label, value }: { label: string; value: string }) {
       <Typography variant="body1" fontWeight={600}>
         {value}
       </Typography>
+    </Box>
+  );
+}
+
+const BIAS_LABEL = {
+  bullish: "Bullish",
+  bearish: "Bearish",
+  neutral: "Neutral / sideways",
+  unclear: "No clear direction",
+} as const;
+
+const BIAS_COLOR = {
+  bullish: "success",
+  bearish: "error",
+  neutral: "warning",
+  unclear: "default",
+} as const;
+
+const HORIZON_LABEL = {
+  intraday: "Intraday",
+  swing: "Swing (days)",
+  positional: "Positional (weeks+)",
+} as const;
+
+const LEAN_LABEL = {
+  favoured: "Favoured",
+  possible: "Possible",
+  unlikely: "Less likely",
+} as const;
+
+const LEAN_COLOR = {
+  favoured: "primary",
+  possible: "default",
+  unlikely: "default",
+} as const;
+
+function OutlookBlock({ section }: { section: OutlookSection }) {
+  return (
+    <Box>
+      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 0.5 }}>
+        <Typography variant="subtitle2" fontWeight={700}>
+          {section.title}
+        </Typography>
+        {section.lean && (
+          <Chip size="small" label={LEAN_LABEL[section.lean]} color={LEAN_COLOR[section.lean]} variant="outlined" />
+        )}
+        {section.matchesUserView === true && (
+          <Chip size="small" label="Matches your view" color="info" variant="outlined" />
+        )}
+        {section.matchesUserView === false && (
+          <Chip size="small" label="Against your view" variant="outlined" />
+        )}
+      </Stack>
+      <Typography variant="body2" color="text.primary" sx={{ lineHeight: 1.6 }}>
+        {section.summary}
+      </Typography>
+      {section.bullets.length > 0 && (
+        <Box component="ul" sx={{ m: 0, mt: 0.75, pl: 2.5 }}>
+          {section.bullets.map((b) => (
+            <Typography
+              key={b}
+              component="li"
+              variant="body2"
+              color="text.secondary"
+              sx={{ lineHeight: 1.6, mb: 0.4 }}
+            >
+              {b}
+            </Typography>
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }
@@ -60,8 +136,19 @@ export default function AnalyzeStockPage() {
   const [universe, setUniverse] = useState<UniverseInstrument[]>([]);
   const [selected, setSelected] = useState<UniverseInstrument | null>(null);
   const [result, setResult] = useState<AnalyzeStockResult | null>(null);
+  const [userView, setUserView] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const outlookSections = useMemo(
+    () => (result ? buildFutureOutlookSections(result, userView) : []),
+    [result, userView],
+  );
+  const nextMoveSections = useMemo(
+    () => (result ? buildNextMoveSections(result) : []),
+    [result],
+  );
+  const view = useMemo(() => readUserView(userView), [userView]);
 
   useEffect(() => {
     setTitle("Analyze Stock");
@@ -77,6 +164,7 @@ export default function AnalyzeStockPage() {
   async function load(instrument: UniverseInstrument | null) {
     setSelected(instrument);
     setResult(null);
+    setUserView("");
     if (!instrument) return;
     setLoading(true);
     setError(null);
@@ -127,8 +215,9 @@ export default function AnalyzeStockPage() {
 
       {!selected && !loading && (
         <Typography color="text.secondary">
-          Pick a stock to see pivots, trade score, entry / SL / T1, liquidity zones, sector, and a
-          good-or-not verdict from your latest runs.
+          Pick a stock to see a future outlook, pivots, trade score, entry / SL / T1, liquidity zones,
+          and a verdict from your engines. Optionally write how you feel about the stock — the outlook
+          will compare your view with the system.
         </Typography>
       )}
 
@@ -185,6 +274,57 @@ export default function AnalyzeStockPage() {
             </Stack>
           )}
 
+          <Box sx={{ mt: 2.5 }}>
+            <TextField
+              label="Your view about this stock"
+              placeholder="Write anything — e.g. I feel this will bounce, too extended might fall, confused / sideways…"
+              value={userView}
+              onChange={(e) => setUserView(e.target.value)}
+              fullWidth
+              multiline
+              minRows={2}
+              maxRows={6}
+              size="small"
+            />
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
+              <Typography variant="caption" color="text.secondary">
+                Read from your note:
+              </Typography>
+              <Chip size="small" label={BIAS_LABEL[view.bias]} color={BIAS_COLOR[view.bias]} variant="outlined" />
+              {view.strength !== "none" && (
+                <Chip size="small" label={`${view.strength} conviction`} variant="outlined" />
+              )}
+              {view.horizon && <Chip size="small" label={HORIZON_LABEL[view.horizon]} variant="outlined" />}
+              <Typography variant="caption" color="text.secondary">
+                Outlook updates as you type — no re-fetch needed.
+              </Typography>
+            </Stack>
+          </Box>
+
+          <Box
+            sx={{
+              mt: 2.5,
+              p: 2,
+              borderRadius: 1,
+              border: "1px solid",
+              borderColor: "primary.main",
+              bgcolor: "background.default",
+            }}
+          >
+            <Typography variant="subtitle1" fontWeight={800} gutterBottom>
+              Future outlook
+            </Typography>
+            <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+              Scenario paths from live levels, engines and recent bars — not a guaranteed prediction.
+              Your note changes emphasis and alignment only, never the price map.
+            </Typography>
+            <Stack spacing={2.5}>
+              {outlookSections.map((s) => (
+                <OutlookBlock key={s.title} section={s} />
+              ))}
+            </Stack>
+          </Box>
+
           <Box
             sx={{
               mt: 2.5,
@@ -202,7 +342,7 @@ export default function AnalyzeStockPage() {
               Plain-language reading of this stock’s live engines — not a buy/sell order.
             </Typography>
             <Stack spacing={2}>
-              {buildNextMoveSections(result).map((s) => (
+              {nextMoveSections.map((s) => (
                 <Box key={s.title}>
                   <Typography variant="subtitle2" fontWeight={700} gutterBottom>
                     {s.title}
