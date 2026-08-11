@@ -458,6 +458,86 @@ public sealed class OptionsIntradayRecommendationRow
     public Guid? AnalysisSignalId { get; set; }
 }
 
+/// <summary>One Nifty ORB index-options idea (option buying: primary 1 ITM + alt ATM).</summary>
+public sealed class NiftyOrbRunRow
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public DateOnly AsOfDate { get; set; }
+    public string Status { get; set; } = "running";
+    public string? ErrorMessage { get; set; }
+}
+
+public sealed class NiftyOrbRecommendationRow
+{
+    public Guid Id { get; set; }
+    public Guid RunId { get; set; }
+    public Guid UserId { get; set; }
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "NIFTY";
+    public string InstrumentName { get; set; } = "Nifty 50";
+    public string Side { get; set; } = "buy";
+    public string SignalSource { get; set; } = "nifty_orb";
+    public string Status { get; set; } = "recommended";
+    public string? SkipReason { get; set; }
+    public decimal? SpotLtp { get; set; }
+    public decimal? OrbHigh { get; set; }
+    public decimal? OrbLow { get; set; }
+    public decimal? OrbRange { get; set; }
+    public decimal UnderlyingEntry { get; set; }
+    public decimal UnderlyingStopLoss { get; set; }
+    public decimal? UnderlyingTargetT1 { get; set; }
+    public decimal? UnderlyingTargetT2 { get; set; }
+    public decimal? UnderlyingTargetT3 { get; set; }
+    public int ConfidenceScore { get; set; }
+    public string[] Reasons { get; set; } = Array.Empty<string>();
+    public string? ContractTradingSymbol { get; set; }
+    public string? ContractExpiryLabel { get; set; }
+    public decimal? ContractStrike { get; set; }
+    public string? ContractOptionType { get; set; }
+    public string? ContractToken { get; set; }
+    public int? ContractLotSize { get; set; }
+    public decimal? PremiumLtp { get; set; }
+    /// <summary>Estimated option premium stop (delta × Nifty risk from entry).</summary>
+    public decimal? PremiumStopLoss { get; set; }
+    public decimal? PremiumTargetT1 { get; set; }
+    public decimal? PremiumTargetT2 { get; set; }
+    public decimal? PremiumTargetT3 { get; set; }
+    public decimal? Delta { get; set; }
+    public decimal? Gamma { get; set; }
+    public decimal? Theta { get; set; }
+    public decimal? Vega { get; set; }
+    public decimal? ImpliedVolatility { get; set; }
+    public decimal? TradeVolume { get; set; }
+    public string? AltTradingSymbol { get; set; }
+    public decimal? AltStrike { get; set; }
+    public decimal? AltDelta { get; set; }
+    public decimal? AltImpliedVolatility { get; set; }
+    public decimal? AltPremiumLtp { get; set; }
+    public string FlatByIst { get; set; } = "14:30";
+}
+
+/// <summary>High-probability Nifty index option strike alert.</summary>
+public sealed class IndexOptionNotificationRow
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public Guid? RecommendationId { get; set; }
+    public string SignalSource { get; set; } = "";
+    public string Side { get; set; } = "";
+    public DateOnly AsOfDate { get; set; }
+    public decimal ContractStrike { get; set; }
+    public string ContractOptionType { get; set; } = "";
+    public decimal PremiumLtp { get; set; }
+    public decimal? PremiumStopLoss { get; set; }
+    public decimal? PremiumTargetT1 { get; set; }
+    public int ConfidenceScore { get; set; }
+    public string Title { get; set; } = "";
+    public string Body { get; set; } = "";
+    public DateTimeOffset? ReadAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 /// <summary>Single-stock deep dive composed from existing engines.</summary>
 public sealed class AnalyzeStockResult
 {
@@ -560,4 +640,15 @@ public sealed class LiquidityInstrumentEval
     public string? NearestZoneType { get; set; }
     public decimal? NearestZonePrice { get; set; }
     public decimal? DistancePct { get; set; }
+}
+
+/// <summary>Headline from a free public market RSS feed.</summary>
+public sealed class MarketNewsItem
+{
+    public string Id { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string Summary { get; set; } = "";
+    public string Url { get; set; } = "";
+    public string Source { get; set; } = "";
+    public DateTimeOffset PublishedAt { get; set; }
 }

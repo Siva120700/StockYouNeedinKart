@@ -43,6 +43,11 @@ public sealed class DatabaseMigrator
             Path.Combine(databaseRoot, "018_sector_confirmed_filter.sql"),
             Path.Combine(databaseRoot, "019_liquidity_v2.sql"),
             Path.Combine(databaseRoot, "020_liquidity_v2_events.sql"),
+            Path.Combine(databaseRoot, "021_nifty_orb.sql"),
+            Path.Combine(databaseRoot, "022_nifty_orb_premium_levels.sql"),
+            Path.Combine(databaseRoot, "023_nifty_orb_liq_v2.sql"),
+            Path.Combine(databaseRoot, "024_nifty_liq_breakout.sql"),
+            Path.Combine(databaseRoot, "025_index_option_notifications.sql"),
         };
 
         await using var conn = new NpgsqlConnection(_db.ConnectionString);

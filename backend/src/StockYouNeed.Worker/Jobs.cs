@@ -150,3 +150,95 @@ public sealed class LtpPollHostedService : BackgroundService
         return t >= TimeSpan.FromHours(9) && t <= TimeSpan.FromHours(15).Add(TimeSpan.FromMinutes(35));
     }
 }
+
+/// <summary>
+/// Scans Nifty Index Options (ORB + optional Liq V2) during the session so a
+/// recommendation appears as soon as a break/setup is found — not only on manual Run.
+/// </summary>
+public sealed class NiftyOrbPollHostedService : BackgroundService
+{
+    private static readonly TimeSpan Ist = TimeSpan.FromHours(5.5);
+    private readonly IServiceProvider _sp;
+    private readonly WorkerScheduleOptions _schedule;
+    private readonly ILogger<NiftyOrbPollHostedService> _logger;
+
+    public NiftyOrbPollHostedService(
+        IServiceProvider sp,
+        IOptions<WorkerScheduleOptions> schedule,
+        ILogger<NiftyOrbPollHostedService> logger)
+    {
+        _sp = sp;
+        _schedule = schedule.Value;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        if (!_schedule.NiftyOrbPollEnabled)
+        {
+            _logger.LogInformation("Nifty ORB poll disabled in WorkerSchedule");
+            return;
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(12), stoppingToken);
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (InScanWindowIst())
+                    await ScanSafeAsync(stoppingToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "Nifty ORB poll loop error");
+            }
+
+            var delaySec = Math.Max(60, _schedule.NiftyOrbPollIntervalSeconds);
+            // Off-window: wake hourly to catch next session without busy-looping.
+            if (!InScanWindowIst())
+                delaySec = Math.Max(delaySec, 60 * 15);
+            await Task.Delay(TimeSpan.FromSeconds(delaySec), stoppingToken);
+        }
+    }
+
+    private async Task ScanSafeAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _sp.CreateScope();
+            var auth = scope.ServiceProvider.GetRequiredService<IOptions<DevAuthOptions>>().Value;
+            var niftyOrb = scope.ServiceProvider
+                .GetRequiredService<StockYouNeed.Application.IndexOptions.NiftyOrbService>();
+            var instruments = scope.ServiceProvider.GetRequiredService<IInstrumentRepository>();
+            await instruments.EnsureDemoUserAsync(auth.DemoUserId, auth.DemoEmail, auth.DemoDisplayName, ct);
+
+            var run = await niftyOrb.RunAsync(auth.DemoUserId, ct);
+            var recs = await niftyOrb.GetRecommendationsAsync(auth.DemoUserId, run.Id, ct);
+            var orb = recs.FirstOrDefault(r => r.SignalSource == "nifty_orb"
+                || string.IsNullOrEmpty(r.SignalSource));
+            var combo = recs.FirstOrDefault(r => r.SignalSource == "nifty_orb_liq_v2");
+            var liqBo = recs.FirstOrDefault(r => r.SignalSource == "nifty_liq_breakout");
+            _logger.LogInformation(
+                "Nifty ORB auto-scan: run={Status} orb={OrbStatus} combo={ComboStatus} liqBo={LiqBoStatus}",
+                run.Status,
+                orb?.Status ?? "(none)",
+                combo?.Status ?? "(none)",
+                liqBo?.Status ?? "(none)");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Nifty ORB auto-scan failed");
+        }
+    }
+
+    /// <summary>9:15–14:30 IST weekdays — OR forming + break watch until flat.</summary>
+    private static bool InScanWindowIst()
+    {
+        var ist = DateTimeOffset.UtcNow.ToOffset(Ist);
+        if (ist.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+            return false;
+        var t = TimeOnly.FromDateTime(ist.DateTime);
+        return t >= new TimeOnly(9, 15) && t < new TimeOnly(14, 30);
+    }
+}

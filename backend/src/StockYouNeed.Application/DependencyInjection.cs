@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using StockYouNeed.Application.Analyze;
+using StockYouNeed.Application.News;
 using StockYouNeed.Application.OptionsIntraday;
 using StockYouNeed.Application.Outcomes;
 using StockYouNeed.Application.Services;
@@ -17,6 +18,8 @@ public static class DependencyInjection
         services.AddScoped<SignalOutcomeService>();
         services.AddScoped<NfoSyncService>();
         services.AddScoped<OptionsIntradayService>();
+        services.AddScoped<Application.IndexOptions.NiftyOrbService>();
+        services.AddScoped<Application.IndexOptions.IndexOptionNotificationService>();
         services.AddScoped<AnalysisRunService>();
         services.AddScoped<LiquidityAnalysisService>();
         services.AddScoped<Application.Confluence.ConfluenceService>();
@@ -25,6 +28,7 @@ public static class DependencyInjection
         services.AddScoped<AnalyzeStockService>();
         services.AddScoped<BacktestService>();
         services.AddScoped<UniverseSeedService>();
+        services.AddScoped<MarketNewsService>();
         return services;
     }
 }

@@ -115,6 +115,89 @@ public sealed class NfoSyncService
         return rows.Count;
     }
 
+    /// <summary>
+    /// Sync Nifty OPTIDX / FUTIDX contracts for the NIFTY sector_index instrument.
+    /// Does not wipe equity NFO rows.
+    /// </summary>
+    public async Task<int> SyncNiftyIndexNfoAsync(Guid niftyInstrumentId, CancellationToken ct = default)
+    {
+        var scrips = await _angel.DownloadScripMasterAsync(ct);
+        var nfo = scrips
+            .Where(s => s.ExchSeg.Equals("NFO", StringComparison.OrdinalIgnoreCase))
+            .Where(s =>
+                s.InstrumentType.Equals("OPTIDX", StringComparison.OrdinalIgnoreCase)
+                || s.InstrumentType.Equals("FUTIDX", StringComparison.OrdinalIgnoreCase))
+            .Where(s => s.Name.Equals("NIFTY", StringComparison.OrdinalIgnoreCase)
+                        || s.Name.Equals("Nifty 50", StringComparison.OrdinalIgnoreCase)
+                        || s.Symbol.StartsWith("NIFTY", StringComparison.OrdinalIgnoreCase))
+            // Exclude Bank Nifty / Fin Nifty / Midcap etc.
+            .Where(s => !s.Name.Contains("BANK", StringComparison.OrdinalIgnoreCase)
+                        && !s.Name.Contains("FIN", StringComparison.OrdinalIgnoreCase)
+                        && !s.Name.Contains("MID", StringComparison.OrdinalIgnoreCase)
+                        && !s.Symbol.StartsWith("BANKNIFTY", StringComparison.OrdinalIgnoreCase)
+                        && !s.Symbol.StartsWith("FINNIFTY", StringComparison.OrdinalIgnoreCase)
+                        && !s.Symbol.StartsWith("MIDCPNIFTY", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
+        var rows = new List<NfoContractRow>();
+
+        foreach (var s in nfo)
+        {
+            if (!TryParseExpiry(s.Expiry, out var expiry, out var label))
+                continue;
+            if (expiry < today) continue;
+
+            var isOpt = s.InstrumentType.Equals("OPTIDX", StringComparison.OrdinalIgnoreCase);
+            string? optType = null;
+            decimal? strike = null;
+            if (isOpt)
+            {
+                optType = InferOptionType(s.Symbol);
+                if (optType is null) continue;
+                strike = ParseIndexStrike(s.Strike);
+                if (strike is null or <= 0) continue;
+            }
+
+            _ = int.TryParse(s.LotSize, out var lot);
+            if (lot <= 0) lot = 1;
+            _ = decimal.TryParse(s.TickSize, NumberStyles.Any, CultureInfo.InvariantCulture, out var tick);
+            if (tick <= 0) tick = 0.05m;
+
+            rows.Add(new NfoContractRow
+            {
+                Id = Guid.NewGuid(),
+                UnderlyingInstrumentId = niftyInstrumentId,
+                AppSymbol = "NIFTY",
+                AngelName = "NIFTY",
+                Kind = isOpt ? "option" : "future",
+                OptionType = optType,
+                Strike = strike,
+                Expiry = expiry,
+                ExpiryLabel = label,
+                SymbolToken = s.Token,
+                TradingSymbol = s.Symbol,
+                LotSize = lot,
+                TickSize = tick,
+            });
+        }
+
+        await _nfo.ReplaceNfoForUnderlyingAsync(niftyInstrumentId, rows, ct);
+        _logger.LogInformation("Nifty index NFO sync: stored {Count} OPTIDX/FUTIDX contracts", rows.Count);
+        return rows.Count;
+    }
+
+    /// <summary>Angel index option strikes are typically ×100 (2450000 → 24500).</summary>
+    public static decimal? ParseIndexStrike(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        if (!decimal.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var v))
+            return null;
+        if (v >= 100_000m && v == Math.Truncate(v) && v % 100 == 0)
+            return v / 100m;
+        return v;
+    }
+
     private static List<string> LookupKeys(string appSymbol)
     {
         var appKey = appSymbol.Trim().ToUpperInvariant();

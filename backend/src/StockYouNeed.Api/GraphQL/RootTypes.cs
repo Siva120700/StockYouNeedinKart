@@ -112,6 +112,54 @@ public sealed class Query
         }
     }
 
+    public async Task<IReadOnlyList<NiftyOrbRecommendationRow>> NiftyOrbRecommendations(
+        Guid? runId,
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.IndexOptions.NiftyOrbService niftyOrb,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await niftyOrb.GetRecommendationsAsync(user.UserId, runId, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
+    public async Task<IReadOnlyList<IndexOptionNotificationRow>> IndexOptionNotifications(
+        bool unreadOnly,
+        int limit,
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.IndexOptions.IndexOptionNotificationService notifications,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await notifications.GetAsync(user.UserId, unreadOnly, limit <= 0 ? 30 : limit, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
+    public async Task<IReadOnlyList<MarketNewsItem>> MarketNews(
+        int? limit,
+        [Service] Application.News.MarketNewsService news,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await news.GetNewsAsync(limit ?? 40, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
     public async Task<IReadOnlyList<BacktestNoteRow>> BacktestNotes(
         Guid? instrumentId,
         string? strategy,
@@ -214,7 +262,7 @@ public sealed class Query
     {
         if (string.IsNullOrWhiteSpace(strategy)) return null;
         var s = strategy.Trim().ToLowerInvariant();
-        return s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout" or "options_intraday" ? s : null;
+        return s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout" or "options_intraday" or "nifty_orb" or "nifty_orb_liq_v2" or "nifty_liq_breakout" ? s : null;
     }
 
     private static string? NormalizeOutcomeResult(string? result)
@@ -494,6 +542,37 @@ public sealed class Mutation
         try
         {
             return await options.RunAsync(user.UserId, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
+    public async Task<NiftyOrbRunRow> RunNiftyOrbAnalysis(
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.IndexOptions.NiftyOrbService niftyOrb,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await niftyOrb.RunAsync(user.UserId, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
+    public async Task<int> MarkIndexOptionNotificationsRead(
+        Guid[] ids,
+        [Service] ICurrentUserAccessor user,
+        [Service] Application.IndexOptions.IndexOptionNotificationService notifications,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await notifications.MarkReadAsync(user.UserId, ids, ct);
         }
         catch (Exception ex)
         {

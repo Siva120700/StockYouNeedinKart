@@ -14,7 +14,47 @@ public sealed class OptionsIntradayRepository : IOptionsIntradayRepository
     {
         using var conn = _db.CreateConnection();
         // Shared market data — no RLS user required.
-        await conn.ExecuteAsync(new CommandDefinition("DELETE FROM nfo_contracts", cancellationToken: ct));
+        // Only wipe equity underlyings so index OPTIDX rows (Nifty ORB) survive.
+        await conn.ExecuteAsync(new CommandDefinition("""
+            DELETE FROM nfo_contracts nc
+            USING instruments i
+            WHERE nc.underlying_instrument_id = i.id
+              AND i.kind = 'equity'
+            """, cancellationToken: ct));
+        if (rows.Count == 0) return;
+
+        const string sql = """
+            INSERT INTO nfo_contracts (
+              id, underlying_instrument_id, app_symbol, angel_name, kind, option_type, strike,
+              expiry, expiry_label, symbol_token, trading_symbol, lot_size, tick_size)
+            VALUES (
+              @Id, @UnderlyingInstrumentId, @AppSymbol, @AngelName, @Kind, @OptionType, @Strike,
+              @Expiry, @ExpiryLabel, @SymbolToken, @TradingSymbol, @LotSize, @TickSize)
+            ON CONFLICT (symbol_token) DO UPDATE SET
+              underlying_instrument_id = EXCLUDED.underlying_instrument_id,
+              app_symbol = EXCLUDED.app_symbol,
+              angel_name = EXCLUDED.angel_name,
+              kind = EXCLUDED.kind,
+              option_type = EXCLUDED.option_type,
+              strike = EXCLUDED.strike,
+              expiry = EXCLUDED.expiry,
+              expiry_label = EXCLUDED.expiry_label,
+              trading_symbol = EXCLUDED.trading_symbol,
+              lot_size = EXCLUDED.lot_size,
+              tick_size = EXCLUDED.tick_size,
+              updated_at = now()
+            """;
+        foreach (var row in rows)
+            await conn.ExecuteAsync(new CommandDefinition(sql, row, cancellationToken: ct));
+    }
+
+    public async Task ReplaceNfoForUnderlyingAsync(
+        Guid underlyingInstrumentId, IReadOnlyList<NfoContractRow> rows, CancellationToken ct = default)
+    {
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM nfo_contracts WHERE underlying_instrument_id = @underlyingInstrumentId",
+            new { underlyingInstrumentId }, cancellationToken: ct));
         if (rows.Count == 0) return;
 
         const string sql = """

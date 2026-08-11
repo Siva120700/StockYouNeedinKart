@@ -127,18 +127,40 @@ public sealed class TokenSyncService
             if (!UniverseSeedService.SectorAngelNameHints.TryGetValue(sector.Symbol, out var hint))
                 hint = sector.Name;
 
-            var scrip = nseIndex.FirstOrDefault(s =>
-                s.Name.Equals(hint, StringComparison.OrdinalIgnoreCase)
-                || s.Name.Equals(sector.Name, StringComparison.OrdinalIgnoreCase));
-
-            if (scrip is null)
+            AngelScrip? scrip = null;
+            if (sector.Symbol.Equals("NIFTY", StringComparison.OrdinalIgnoreCase))
             {
-                var candidates = nseIndex
-                    .Where(s => s.Name.Contains(hint, StringComparison.OrdinalIgnoreCase))
+                // Prefer true Nifty 50 — never Nifty 500 / Bank / Fin / Midcap.
+                scrip = nseIndex.FirstOrDefault(s =>
+                    s.Name.Equals("Nifty 50", StringComparison.OrdinalIgnoreCase)
+                    || s.Name.Equals("NIFTY 50", StringComparison.OrdinalIgnoreCase)
+                    || s.Symbol.Equals("Nifty 50", StringComparison.OrdinalIgnoreCase));
+                scrip ??= nseIndex
+                    .Where(s =>
+                        (s.Name.Equals("NIFTY", StringComparison.OrdinalIgnoreCase)
+                         || s.Name.Contains("Nifty 50", StringComparison.OrdinalIgnoreCase))
+                        && !s.Name.Contains("500", StringComparison.OrdinalIgnoreCase)
+                        && !s.Name.Contains("BANK", StringComparison.OrdinalIgnoreCase)
+                        && !s.Name.Contains("FIN", StringComparison.OrdinalIgnoreCase)
+                        && !s.Name.Contains("MID", StringComparison.OrdinalIgnoreCase))
                     .OrderBy(s => s.Name.Length)
-                    .ToList();
-                if (candidates.Count > 0)
-                    scrip = candidates[0];
+                    .FirstOrDefault();
+            }
+            else
+            {
+                scrip = nseIndex.FirstOrDefault(s =>
+                    s.Name.Equals(hint, StringComparison.OrdinalIgnoreCase)
+                    || s.Name.Equals(sector.Name, StringComparison.OrdinalIgnoreCase));
+
+                if (scrip is null)
+                {
+                    var candidates = nseIndex
+                        .Where(s => s.Name.Contains(hint, StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(s => s.Name.Length)
+                        .ToList();
+                    if (candidates.Count > 0)
+                        scrip = candidates[0];
+                }
             }
 
             if (scrip is null)

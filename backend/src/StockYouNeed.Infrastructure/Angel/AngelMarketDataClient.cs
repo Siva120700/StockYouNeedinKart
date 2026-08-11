@@ -256,6 +256,14 @@ public sealed class AngelMarketDataClient : IAngelMarketDataClient
         CancellationToken ct = default)
         => await FetchCandlesAsync(exchange, symbolToken, "ONE_HOUR", fromIst, toIst, ct);
 
+    public async Task<IReadOnlyList<AngelCandle>> GetFifteenMinuteCandlesAsync(
+        string exchange,
+        string symbolToken,
+        DateTime fromIst,
+        DateTime toIst,
+        CancellationToken ct = default)
+        => await FetchCandlesAsync(exchange, symbolToken, "FIFTEEN_MINUTE", fromIst, toIst, ct);
+
     private async Task<IReadOnlyList<AngelCandle>> FetchCandlesAsync(
         string exchange,
         string symbolToken,

@@ -96,6 +96,57 @@ public static class OptionStrikeSelector
     }
 
     /// <summary>
+    /// Same ATM/1ITM gate as <see cref="Select"/>, but primary is forced to 1 ITM
+    /// when eligible (ATM becomes alternate). Used by Nifty ORB index options.
+    /// </summary>
+    public static (Candidate? Primary, Candidate? Alternative) SelectPreferItm(
+        string side,
+        decimal spot,
+        IReadOnlyList<AngelOptionGreek> greeks,
+        IReadOnlyList<NfoContractRow> optionContracts,
+        string expiryLabel)
+    {
+        var (scoredPrimary, scoredAlt) = Select(side, spot, greeks, optionContracts, expiryLabel);
+        if (scoredPrimary is null)
+            return (null, null);
+
+        var optType = side.Equals(SignalSides.Sell, StringComparison.OrdinalIgnoreCase) ? "PE" : "CE";
+        var chainStrikes = greeks
+            .Where(g => g.OptionType.Equals(optType, StringComparison.OrdinalIgnoreCase))
+            .Select(g => g.StrikePrice)
+            .Distinct()
+            .OrderBy(s => s)
+            .ToList();
+        if (chainStrikes.Count == 0)
+            return (scoredPrimary, scoredAlt);
+
+        var atmStrike = chainStrikes.OrderBy(s => Math.Abs(s - spot)).First();
+        var step = InferStep(chainStrikes, atmStrike);
+        var itmStrike = optType == "CE" ? atmStrike - step : atmStrike + step;
+        if (!chainStrikes.Contains(itmStrike))
+        {
+            itmStrike = optType == "CE"
+                ? chainStrikes.Where(s => s < atmStrike).DefaultIfEmpty(atmStrike).Max()
+                : chainStrikes.Where(s => s > atmStrike).DefaultIfEmpty(atmStrike).Min();
+        }
+
+        Candidate? Find(decimal strike) =>
+            new[] { scoredPrimary, scoredAlt }
+                .Where(c => c is not null && c.Strike == strike)
+                .Cast<Candidate>()
+                .FirstOrDefault();
+
+        var itm = Find(itmStrike);
+        var atm = Find(atmStrike);
+
+        if (itm is not null && atm is not null && itm.Strike != atm.Strike)
+            return (itm, atm);
+        if (itm is not null)
+            return (itm, atm ?? scoredAlt);
+        return (scoredPrimary, scoredAlt);
+    }
+
+    /// <summary>
     /// Angel CE delta ≥ 0, PE delta ≤ 0. We only buy options, so expose +|Δ|.
     /// </summary>
     public static decimal? ToLongOptionDelta(decimal? rawContractDelta)

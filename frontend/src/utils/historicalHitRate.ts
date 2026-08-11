@@ -12,7 +12,10 @@ export type ScreenerStrategy =
   | "confluence"
   | "breakout"
   | "trade_score"
-  | "options_intraday";
+  | "options_intraday"
+  | "nifty_orb"
+  | "nifty_orb_liq_v2"
+  | "nifty_liq_breakout";
 
 export type HitRateByInstrument = Map<string, number | null>;
 

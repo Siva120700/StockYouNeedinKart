@@ -35,6 +35,32 @@ function riskReward(row: TradeConfidenceScore): number | null {
   return reward / risk;
 }
 
+function formatTarget(row: TradeConfidenceScore, target: number | null | undefined) {
+  if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice) return "";
+  const t = Number(target);
+  const entry = Number(row.entryPrice);
+  if (entry === 0) return t.toFixed(2);
+  const pct =
+    row.side === "sell" ? ((entry - t) / entry) * 100 : ((t - entry) / entry) * 100;
+  return `${t.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+}
+
+function formatSl(row: TradeConfidenceScore) {
+  const sl = row.initialStopLoss;
+  if (sl == null || !Number.isFinite(Number(sl)) || !row.entryPrice) return "";
+  const s = Number(sl);
+  const entry = Number(row.entryPrice);
+  if (entry === 0) return s.toFixed(2);
+  const pct = ((s - entry) / entry) * 100;
+  return `${s.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
+}
+
 export default function TradeScorePage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
@@ -151,18 +177,29 @@ export default function TradeScorePage() {
         minDecimalPlaces: 2,
         getValue: (r) => r.entryPrice,
       }),
-      columnFactories.createNumberColumn<TradeConfidenceScore>({
+      columnFactories.createTextColumn<TradeConfidenceScore>({
         field: "initialStopLoss",
         headerName: "SL",
-        width: 100,
-        minDecimalPlaces: 2,
-        getValue: (r) => r.initialStopLoss,
+        width: 150,
+        getValue: (r) => formatSl(r),
       }),
       columnFactories.createTextColumn<TradeConfidenceScore>({
         field: "targetT1",
         headerName: "T1",
-        width: 100,
-        getValue: (r) => (r.targetT1 != null ? Number(r.targetT1).toFixed(2) : ""),
+        width: 150,
+        getValue: (r) => formatTarget(r, r.targetT1),
+      }),
+      columnFactories.createTextColumn<TradeConfidenceScore>({
+        field: "targetT2",
+        headerName: "T2",
+        width: 150,
+        getValue: (r) => formatTarget(r, r.targetT2),
+      }),
+      columnFactories.createTextColumn<TradeConfidenceScore>({
+        field: "targetT3",
+        headerName: "T3",
+        width: 150,
+        getValue: (r) => formatTarget(r, r.targetT3),
       }),
       columnFactories.createTextColumn<TradeConfidenceScore>({
         field: "rr",

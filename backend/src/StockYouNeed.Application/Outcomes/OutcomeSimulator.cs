@@ -21,7 +21,8 @@ public static class OutcomeSimulator
         decimal? RMultiple);
 
     public static bool UsesHourlyBars(string strategy) =>
-        strategy is "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score";
+        strategy is "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence"
+            or "trade_score" or "nifty_orb" or "nifty_orb_liq_v2";
 
     public static int TimeStopBars(string strategy) =>
         UsesHourlyBars(strategy) ? HourlyTimeStopBars : DailyTimeStopBars;

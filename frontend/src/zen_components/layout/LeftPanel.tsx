@@ -14,6 +14,7 @@ import {
   Drop,
   ListChecks,
   MagnifyingGlass,
+  Newspaper,
   Notebook,
   Pulse,
   SidebarSimple,
@@ -24,6 +25,7 @@ import { DEFAULT_ICON_SIZE } from "../../constants";
 const navItems = [
   { to: "/ltp", label: "Live LTP", icon: Pulse },
   { to: "/analyze", label: "Analyze Stock", icon: MagnifyingGlass },
+  { to: "/news", label: "News", icon: Newspaper },
   { to: "/signals", label: "Signals", icon: ChartLine },
   { to: "/liquidity", label: "Liquidity", icon: Drop },
   { to: "/liquidity-fresh", label: "Liquidity Fresh", icon: Drop },
@@ -32,6 +34,7 @@ const navItems = [
   { to: "/breakout", label: "Breakout", icon: ChartLine },
   { to: "/trade-score", label: "Trade Score", icon: ChartLine },
   { to: "/options-intraday", label: "Options Intraday", icon: ChartLine },
+  { to: "/index-options", label: "Index Options", icon: ChartLine },
   { to: "/accuracy", label: "Accuracy", icon: Notebook },
   { to: "/backtest", label: "Backtest", icon: Notebook },
   { to: "/positions", label: "Positions", icon: ListChecks },

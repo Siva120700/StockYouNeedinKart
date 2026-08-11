@@ -30,6 +30,13 @@ public interface IAngelMarketDataClient
         DateTime toIst,
         CancellationToken ct = default);
 
+    Task<IReadOnlyList<AngelCandle>> GetFifteenMinuteCandlesAsync(
+        string exchange,
+        string symbolToken,
+        DateTime fromIst,
+        DateTime toIst,
+        CancellationToken ct = default);
+
     Task<IReadOnlyList<AngelScrip>> DownloadScripMasterAsync(CancellationToken ct = default);
 
     /// <summary>Angel optionGreek — name = underlying, expirydate = DDMMMYYYY.</summary>
@@ -236,11 +243,32 @@ public interface IOptionsIntradayRepository
     Task<IReadOnlyList<NfoContractRow>> GetNfoForUnderlyingAsync(
         Guid underlyingInstrumentId, CancellationToken ct = default);
     Task UpdateNfoQuoteAsync(string symbolToken, decimal? ltp, long? oi, CancellationToken ct = default);
+    /// <summary>Replace NFO rows for one underlying only (does not wipe other underlyings).</summary>
+    Task ReplaceNfoForUnderlyingAsync(
+        Guid underlyingInstrumentId, IReadOnlyList<NfoContractRow> rows, CancellationToken ct = default);
     Task<Guid> CreateRunAsync(Guid userId, DateOnly asOfDate, CancellationToken ct = default);
     Task CompleteRunAsync(Guid runId, Guid userId, string status, string? errorMessage, CancellationToken ct = default);
     Task InsertRecommendationAsync(OptionsIntradayRecommendationRow row, CancellationToken ct = default);
     Task<IReadOnlyList<OptionsIntradayRecommendationRow>> GetRecommendationsAsync(
         Guid userId, Guid? runId, CancellationToken ct = default);
+}
+
+public interface INiftyOrbRepository
+{
+    Task<Guid> CreateRunAsync(Guid userId, DateOnly asOfDate, CancellationToken ct = default);
+    Task CompleteRunAsync(Guid runId, Guid userId, string status, string? errorMessage, CancellationToken ct = default);
+    Task InsertRecommendationAsync(NiftyOrbRecommendationRow row, CancellationToken ct = default);
+    Task<IReadOnlyList<NiftyOrbRecommendationRow>> GetRecommendationsAsync(
+        Guid userId, Guid? runId, CancellationToken ct = default);
+}
+
+public interface IIndexOptionNotificationRepository
+{
+    /// <returns>True when a new notification row was inserted (not deduped).</returns>
+    Task<bool> TryInsertAsync(IndexOptionNotificationRow row, CancellationToken ct = default);
+    Task<IReadOnlyList<IndexOptionNotificationRow>> GetAsync(
+        Guid userId, bool unreadOnly, int limit, CancellationToken ct = default);
+    Task<int> MarkReadAsync(Guid userId, IReadOnlyList<Guid> ids, CancellationToken ct = default);
 }
 
 public interface ICurrentUserAccessor

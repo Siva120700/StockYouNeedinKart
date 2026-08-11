@@ -6,6 +6,8 @@ import AnalyzeStockPage from "./modules/analyze-stock/AnalyzeStockPage";
 import BreakoutPage from "./modules/breakout/BreakoutPage";
 import ConfluencePage from "./modules/confluence/ConfluencePage";
 import OptionsIntradayPage from "./modules/options-intraday/OptionsIntradayPage";
+import IndexOptionsPage from "./modules/index-options/IndexOptionsPage";
+import NewsPage from "./modules/news/NewsPage";
 import OutcomesPage from "./modules/outcomes/OutcomesPage";
 import TradeScorePage from "./modules/trade-score/TradeScorePage";
 import BacktestPage from "./pages/BacktestPage";
@@ -38,6 +40,7 @@ export default function App() {
               <Route path="/" element={<Navigate to="/ltp" replace />} />
               <Route path="/ltp" element={<LtpPage />} />
               <Route path="/analyze" element={<AnalyzeStockPage />} />
+              <Route path="/news" element={<NewsPage />} />
               <Route path="/signals" element={<SignalsPage />} />
               <Route path="/liquidity" element={<LiquiditySignalsPage ruleset="classic" />} />
               <Route path="/liquidity-fresh" element={<LiquiditySignalsPage ruleset="fresh" />} />
@@ -47,6 +50,7 @@ export default function App() {
               <Route path="/trade-score" element={<TradeScorePage />} />
               <Route path="/accuracy" element={<OutcomesPage />} />
               <Route path="/options-intraday" element={<OptionsIntradayPage />} />
+              <Route path="/index-options" element={<IndexOptionsPage />} />
               <Route path="/backtest" element={<BacktestPage />} />
               <Route path="/positions" element={<PositionsPage />} />
             </Routes>

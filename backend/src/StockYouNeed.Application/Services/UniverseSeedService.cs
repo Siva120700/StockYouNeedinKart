@@ -154,6 +154,8 @@ public sealed class UniverseSeedService
 
     private static readonly (string Symbol, string Name, string AngelNameContains)[] Sectors =
     [
+        // Benchmark index (also used by Nifty ORB / Index Options).
+        ("NIFTY", "Nifty 50", "Nifty 50"),
         ("NIFTYBANK", "Nifty Bank", "Nifty Bank"),
         ("NIFTYIT", "Nifty IT", "Nifty IT"),
         ("NIFTYPHARMA", "Nifty Pharma", "Nifty Pharma"),

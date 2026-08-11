@@ -31,6 +31,10 @@ public sealed class WorkerScheduleOptions
     public int DailySyncHourIst { get; set; } = 8;
     public int LtpPollIntervalSeconds { get; set; } = 5;
     public int MarketBarsLookbackDays { get; set; } = 60;
+    /// <summary>Auto-scan Nifty Index Options (ORB) during the session.</summary>
+    public bool NiftyOrbPollEnabled { get; set; } = true;
+    /// <summary>Seconds between Index Options scans (9:15–14:30 IST).</summary>
+    public int NiftyOrbPollIntervalSeconds { get; set; } = 180;
 }
 
 public sealed class DevAuthOptions
@@ -39,4 +43,19 @@ public sealed class DevAuthOptions
     public Guid DemoUserId { get; set; } = Guid.Parse("11111111-1111-1111-1111-111111111111");
     public string DemoEmail { get; set; } = "demo@stockyouneed.local";
     public string DemoDisplayName { get; set; } = "Demo User";
+}
+
+public sealed class NewsOptions
+{
+    public const string SectionName = "News";
+
+    /// <summary>Public RSS feed URLs aggregated for the News page.</summary>
+    public string[] FeedUrls { get; set; } =
+    [
+        "https://feeds.feedburner.com/ndtvprofit-latest",
+        "https://news.google.com/rss/search?q=Nifty+OR+Sensex+OR+NSE+stock+market&hl=en-IN&gl=IN&ceid=IN:en",
+    ];
+
+    /// <summary>How long aggregated headlines stay in memory cache.</summary>
+    public int CacheSeconds { get; set; } = 300;
 }

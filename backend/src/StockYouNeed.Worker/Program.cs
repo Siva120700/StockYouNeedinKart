@@ -14,6 +14,7 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHostedService<StockYouNeed.Worker.DailySyncHostedService>();
 builder.Services.AddHostedService<StockYouNeed.Worker.LtpPollHostedService>();
+builder.Services.AddHostedService<StockYouNeed.Worker.NiftyOrbPollHostedService>();
 
 var host = builder.Build();
 

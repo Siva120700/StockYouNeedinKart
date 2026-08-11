@@ -42,6 +42,9 @@ const ALL_OUTCOME_STRATEGIES = [
   "trade_score",
   "breakout",
   "options_intraday",
+  "nifty_orb",
+  "nifty_orb_liq_v2",
+  "nifty_liq_breakout",
 ] as const;
 
 type OutcomeStrategy = (typeof ALL_OUTCOME_STRATEGIES)[number];
