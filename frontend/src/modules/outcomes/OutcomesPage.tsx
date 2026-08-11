@@ -128,6 +128,8 @@ export default function OutcomesPage() {
     ...ALL_OUTCOME_STRATEGIES,
   ]);
   const [result, setResult] = useState<ResultFilter>("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [sectorCheck, setSectorCheck] = useState(false);
   const [expanded, setExpanded] = useState<string | false>(false);
   const [loading, setLoading] = useState(true);
@@ -157,10 +159,14 @@ export default function OutcomesPage() {
         strategyFilter.length === 1 ? strategyFilter[0]! : null;
       const res = result === "all" ? null : result;
       const sectorOnly = sectorCheck || null;
+      const range = {
+        fromDate: fromDate || null,
+        toDate: toDate || null,
+      };
       const [sum, list, accordionList] = await Promise.all([
-        OutcomesApi.fetchSummaries(strat, sectorOnly),
-        OutcomesApi.fetchOutcomes(strat, res, sectorOnly),
-        OutcomesApi.fetchOutcomes(null, res, sectorOnly),
+        OutcomesApi.fetchSummaries(strat, sectorOnly, range),
+        OutcomesApi.fetchOutcomes(strat, res, sectorOnly, range),
+        OutcomesApi.fetchOutcomes(null, res, sectorOnly, range),
       ]);
       setSummaries(filterByStrategies(sum, strategyFilter, (s) => s.strategyFilter));
       setRows(filterByStrategies(list, strategyFilter, (o) => o.strategy));
@@ -271,7 +277,7 @@ export default function OutcomesPage() {
   useEffect(() => {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategyFilter, result, sectorCheck]);
+  }, [strategyFilter, result, sectorCheck, fromDate, toDate]);
 
   useEffect(() => {
     setPageActions(
@@ -321,6 +327,25 @@ export default function OutcomesPage() {
           <MenuItem value="sl">SL</MenuItem>
           <MenuItem value="time_stop">Time stop</MenuItem>
         </TextField>
+        <TextField
+          size="small"
+          label="From"
+          type="date"
+          InputLabelProps={{ shrink: true }}
+          value={fromDate}
+          onChange={(e) => setFromDate(e.target.value)}
+          sx={{ minWidth: 150 }}
+        />
+        <TextField
+          size="small"
+          label="To"
+          type="date"
+          InputLabelProps={{ shrink: true }}
+          value={toDate}
+          onChange={(e) => setToDate(e.target.value)}
+          inputProps={fromDate ? { min: fromDate } : undefined}
+          sx={{ minWidth: 150 }}
+        />
         <FormControlLabel
           control={
             <Switch
@@ -361,7 +386,7 @@ export default function OutcomesPage() {
       </Stack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [strategyFilter, result, sectorCheck, loading, resolving, importing]);
+  }, [strategyFilter, result, sectorCheck, fromDate, toDate, loading, resolving, importing]);
 
   /** Shared columns for accordion + Outcomes table (sortable + searchable via ZenTable). */
   const outcomeColumns = useMemo(

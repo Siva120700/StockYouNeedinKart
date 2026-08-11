@@ -8,20 +8,40 @@ const OUTCOME_FIELDS = `
   sectorConfirmed
 `;
 
+export type OutcomeDateRange = {
+  fromDate?: string | null;
+  toDate?: string | null;
+};
+
 export const OutcomesApi = {
   async fetchOutcomes(
     strategy?: string | null,
     result?: string | null,
     sectorConfirmedOnly?: boolean | null,
+    range?: OutcomeDateRange | null,
   ): Promise<SignalOutcome[]> {
     const data = await gql<{ signalOutcomes: SignalOutcome[] }>(
-      `query ($strategy: String, $result: String, $sectorConfirmedOnly: Boolean) {
-        signalOutcomes(strategy: $strategy, result: $result, sectorConfirmedOnly: $sectorConfirmedOnly) { ${OUTCOME_FIELDS} }
+      `query (
+        $strategy: String
+        $result: String
+        $sectorConfirmedOnly: Boolean
+        $fromDate: LocalDate
+        $toDate: LocalDate
+      ) {
+        signalOutcomes(
+          strategy: $strategy
+          result: $result
+          sectorConfirmedOnly: $sectorConfirmedOnly
+          fromDate: $fromDate
+          toDate: $toDate
+        ) { ${OUTCOME_FIELDS} }
       }`,
       {
         strategy: strategy || null,
         result: result || null,
         sectorConfirmedOnly: sectorConfirmedOnly ?? null,
+        fromDate: range?.fromDate || null,
+        toDate: range?.toDate || null,
       },
     );
     return data.signalOutcomes;
@@ -30,15 +50,31 @@ export const OutcomesApi = {
   async fetchSummaries(
     strategy?: string | null,
     sectorConfirmedOnly?: boolean | null,
+    range?: OutcomeDateRange | null,
   ): Promise<SignalOutcomeSummary[]> {
     const data = await gql<{ signalOutcomeSummaries: SignalOutcomeSummary[] }>(
-      `query ($strategy: String, $sectorConfirmedOnly: Boolean) {
-        signalOutcomeSummaries(strategy: $strategy, sectorConfirmedOnly: $sectorConfirmedOnly) {
+      `query (
+        $strategy: String
+        $sectorConfirmedOnly: Boolean
+        $fromDate: LocalDate
+        $toDate: LocalDate
+      ) {
+        signalOutcomeSummaries(
+          strategy: $strategy
+          sectorConfirmedOnly: $sectorConfirmedOnly
+          fromDate: $fromDate
+          toDate: $toDate
+        ) {
           strategyFilter setups targetHits slHits timeStops openCount
           targetHitRatePct avgTargetHitPct avgRiskReward avgRMultiple
         }
       }`,
-      { strategy: strategy || null, sectorConfirmedOnly: sectorConfirmedOnly ?? null },
+      {
+        strategy: strategy || null,
+        sectorConfirmedOnly: sectorConfirmedOnly ?? null,
+        fromDate: range?.fromDate || null,
+        toDate: range?.toDate || null,
+      },
     );
     return data.signalOutcomeSummaries;
   },

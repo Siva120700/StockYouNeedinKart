@@ -230,10 +230,12 @@ public interface ISignalOutcomeRepository
     Task<IReadOnlyList<SignalOutcomeRow>> GetOpenAsync(Guid userId, CancellationToken ct = default);
     Task<IReadOnlyList<SignalOutcomeRow>> GetOutcomesAsync(
         Guid userId, string? strategy, string? result, bool sectorConfirmedOnly = false,
+        DateOnly? fromDate = null, DateOnly? toDate = null,
         CancellationToken ct = default);
     Task ResolveAsync(SignalOutcomeRow row, CancellationToken ct = default);
     Task<IReadOnlyList<SignalOutcomeSummary>> GetSummariesAsync(
         Guid userId, string? strategy, bool sectorConfirmedOnly = false,
+        DateOnly? fromDate = null, DateOnly? toDate = null,
         CancellationToken ct = default);
 }
 

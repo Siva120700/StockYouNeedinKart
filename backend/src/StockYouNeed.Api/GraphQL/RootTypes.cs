@@ -224,15 +224,18 @@ public sealed class Query
         string? strategy,
         string? result,
         bool? sectorConfirmedOnly,
+        DateOnly? fromDate,
+        DateOnly? toDate,
         [Service] ICurrentUserAccessor user,
         [Service] Application.Outcomes.SignalOutcomeService outcomes,
         CancellationToken ct)
     {
         try
         {
+            var (from, to) = NormalizeDateRange(fromDate, toDate);
             return await outcomes.GetOutcomesAsync(
                 user.UserId, NormalizeStrategy(strategy), NormalizeOutcomeResult(result),
-                sectorConfirmedOnly == true, ct);
+                sectorConfirmedOnly == true, from, to, ct);
         }
         catch (Exception ex)
         {
@@ -243,14 +246,17 @@ public sealed class Query
     public async Task<IReadOnlyList<SignalOutcomeSummary>> SignalOutcomeSummaries(
         string? strategy,
         bool? sectorConfirmedOnly,
+        DateOnly? fromDate,
+        DateOnly? toDate,
         [Service] ICurrentUserAccessor user,
         [Service] Application.Outcomes.SignalOutcomeService outcomes,
         CancellationToken ct)
     {
         try
         {
+            var (from, to) = NormalizeDateRange(fromDate, toDate);
             return await outcomes.GetSummariesAsync(
-                user.UserId, NormalizeStrategy(strategy), sectorConfirmedOnly == true, ct);
+                user.UserId, NormalizeStrategy(strategy), sectorConfirmedOnly == true, from, to, ct);
         }
         catch (Exception ex)
         {
@@ -270,6 +276,14 @@ public sealed class Query
         if (string.IsNullOrWhiteSpace(result)) return null;
         var s = result.Trim().ToLowerInvariant();
         return s is "target" or "sl" or "open" or "time_stop" ? s : null;
+    }
+
+    /// <summary>Inclusive signal-date range; swaps if from &gt; to.</summary>
+    private static (DateOnly? From, DateOnly? To) NormalizeDateRange(DateOnly? fromDate, DateOnly? toDate)
+    {
+        if (fromDate is null || toDate is null || fromDate <= toDate)
+            return (fromDate, toDate);
+        return (toDate, fromDate);
     }
 }
 

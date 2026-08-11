@@ -1,3 +1,4 @@
+using System.Data;
 using Dapper;
 using StockYouNeed.Application.Abstractions;
 using StockYouNeed.Domain;
@@ -79,24 +80,56 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
 
     public async Task<IReadOnlyList<SignalOutcomeRow>> GetOutcomesAsync(
         Guid userId, string? strategy, string? result, bool sectorConfirmedOnly = false,
+        DateOnly? fromDate = null, DateOnly? toDate = null,
         CancellationToken ct = default)
     {
+        var filters = new List<string>
+        {
+            "o.user_id = @userId",
+        };
+        var p = new DynamicParameters();
+        p.Add("userId", userId);
+
+        if (!string.IsNullOrWhiteSpace(strategy))
+        {
+            filters.Add("o.strategy = @strategy");
+            p.Add("strategy", strategy);
+        }
+
+        if (!string.IsNullOrWhiteSpace(result))
+        {
+            filters.Add("o.result = @result");
+            p.Add("result", result);
+        }
+
+        if (sectorConfirmedOnly)
+            filters.Add("o.sector_confirmed");
+
+        if (fromDate is not null)
+        {
+            filters.Add("o.signal_date >= @fromDate");
+            p.Add("fromDate", fromDate.Value.ToDateTime(TimeOnly.MinValue), DbType.Date);
+        }
+
+        if (toDate is not null)
+        {
+            filters.Add("o.signal_date <= @toDate");
+            p.Add("toDate", toDate.Value.ToDateTime(TimeOnly.MinValue), DbType.Date);
+        }
+
         var sql = $"""
             SELECT
             {OutcomeSelect}
             FROM signal_outcomes o
             JOIN instruments i ON i.id = o.instrument_id
-            WHERE o.user_id = @userId
-              AND (@strategy IS NULL OR o.strategy = @strategy)
-              AND (@result IS NULL OR o.result = @result)
-              AND (NOT @sectorConfirmedOnly OR o.sector_confirmed)
+            WHERE {string.Join("\n              AND ", filters)}
             ORDER BY o.signal_date DESC, i.symbol
             LIMIT 2000
             """;
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, userId);
         var rows = await conn.QueryAsync<SignalOutcomeRow>(
-            new CommandDefinition(sql, new { userId, strategy, result, sectorConfirmedOnly }, cancellationToken: ct));
+            new CommandDefinition(sql, p, cancellationToken: ct));
         return rows.ToList();
     }
 
@@ -120,9 +153,39 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
     }
 
     public async Task<IReadOnlyList<SignalOutcomeSummary>> GetSummariesAsync(
-        Guid userId, string? strategy, bool sectorConfirmedOnly = false, CancellationToken ct = default)
+        Guid userId, string? strategy, bool sectorConfirmedOnly = false,
+        DateOnly? fromDate = null, DateOnly? toDate = null,
+        CancellationToken ct = default)
     {
-        const string sql = """
+        var filters = new List<string>
+        {
+            "o.user_id = @userId",
+        };
+        var p = new DynamicParameters();
+        p.Add("userId", userId);
+
+        if (!string.IsNullOrWhiteSpace(strategy))
+        {
+            filters.Add("o.strategy = @strategy");
+            p.Add("strategy", strategy);
+        }
+
+        if (sectorConfirmedOnly)
+            filters.Add("o.sector_confirmed");
+
+        if (fromDate is not null)
+        {
+            filters.Add("o.signal_date >= @fromDate");
+            p.Add("fromDate", fromDate.Value.ToDateTime(TimeOnly.MinValue), DbType.Date);
+        }
+
+        if (toDate is not null)
+        {
+            filters.Add("o.signal_date <= @toDate");
+            p.Add("toDate", toDate.Value.ToDateTime(TimeOnly.MinValue), DbType.Date);
+        }
+
+        var sql = $"""
             SELECT
               o.strategy AS StrategyFilter,
               COUNT(*)::int AS Setups,
@@ -143,16 +206,14 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
               ) FILTER (WHERE o.target_t1 IS NOT NULL) AS AvgRiskReward,
               AVG(o.r_multiple) FILTER (WHERE o.r_multiple IS NOT NULL) AS AvgRMultiple
             FROM signal_outcomes o
-            WHERE o.user_id = @userId
-              AND (@strategy IS NULL OR o.strategy = @strategy)
-              AND (NOT @sectorConfirmedOnly OR o.sector_confirmed)
+            WHERE {string.Join("\n              AND ", filters)}
             GROUP BY o.strategy
             ORDER BY o.strategy
             """;
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, userId);
         var rows = await conn.QueryAsync<SignalOutcomeSummary>(
-            new CommandDefinition(sql, new { userId, strategy, sectorConfirmedOnly }, cancellationToken: ct));
+            new CommandDefinition(sql, p, cancellationToken: ct));
         return rows.ToList();
     }
 

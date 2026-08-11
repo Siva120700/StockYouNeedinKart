@@ -161,8 +161,10 @@ public sealed class SignalOutcomeService
 
     public Task<IReadOnlyList<SignalOutcomeRow>> GetOutcomesAsync(
         Guid userId, string? strategy, string? result, bool sectorConfirmedOnly = false,
+        DateOnly? fromDate = null, DateOnly? toDate = null,
         CancellationToken ct = default)
-        => _outcomes.GetOutcomesAsync(userId, strategy, result, sectorConfirmedOnly, ct);
+        => _outcomes.GetOutcomesAsync(
+            userId, strategy, result, sectorConfirmedOnly, fromDate, toDate, ct);
 
     public Task<IReadOnlyList<SignalOutcomeRow>> GetOpenAsync(
         Guid userId, CancellationToken ct = default)
@@ -170,8 +172,10 @@ public sealed class SignalOutcomeService
 
     public Task<IReadOnlyList<SignalOutcomeSummary>> GetSummariesAsync(
         Guid userId, string? strategy, bool sectorConfirmedOnly = false,
+        DateOnly? fromDate = null, DateOnly? toDate = null,
         CancellationToken ct = default)
-        => _outcomes.GetSummariesAsync(userId, strategy, sectorConfirmedOnly, ct);
+        => _outcomes.GetSummariesAsync(
+            userId, strategy, sectorConfirmedOnly, fromDate, toDate, ct);
 
     /// <summary>
     /// Import currently stored live setups into signal_outcomes (idempotent).
