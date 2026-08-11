@@ -268,7 +268,7 @@ public sealed class Query
     {
         if (string.IsNullOrWhiteSpace(strategy)) return null;
         var s = strategy.Trim().ToLowerInvariant();
-        return s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout" or "options_intraday" or "nifty_orb" or "nifty_orb_liq_v2" or "nifty_liq_breakout" ? s : null;
+        return s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout" or "options_intraday" or "nifty_orb" or "nifty_orb_liq_v2" or "nifty_liq_breakout" or "nifty_breakout_volume" or "nifty_hero_zero" ? s : null;
     }
 
     private static string? NormalizeOutcomeResult(string? result)

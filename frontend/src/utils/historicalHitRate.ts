@@ -15,7 +15,9 @@ export type ScreenerStrategy =
   | "options_intraday"
   | "nifty_orb"
   | "nifty_orb_liq_v2"
-  | "nifty_liq_breakout";
+  | "nifty_liq_breakout"
+  | "nifty_breakout_volume"
+  | "nifty_hero_zero";
 
 export type HitRateByInstrument = Map<string, number | null>;
 

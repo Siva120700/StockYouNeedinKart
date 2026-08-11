@@ -40,6 +40,7 @@ public sealed class IndexOptionNotificationService
             NiftyOrbService.SourceOrbLiqV2
                 => rec.ConfidenceScore >= MinConfidenceCombo,
             NiftyOrbService.SourceOrb or NiftyOrbService.SourceLiqBreakout
+                or NiftyOrbService.SourceBreakoutVolume
                 => rec.ConfidenceScore >= MinConfidenceOrb,
             _ => rec.ConfidenceScore >= MinConfidenceOrb,
         };
@@ -99,6 +100,8 @@ public sealed class IndexOptionNotificationService
     {
         NiftyOrbService.SourceOrbLiqV2 => "ORB + Liquidity V2",
         NiftyOrbService.SourceLiqBreakout => "Liquidity + Breakout",
+        NiftyOrbService.SourceBreakoutVolume => "Breakout + Volume",
+        NiftyOrbService.SourceHeroZero => "Hero Zero",
         _ => "Nifty ORB",
     };
 }

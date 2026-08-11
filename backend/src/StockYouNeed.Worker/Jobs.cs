@@ -219,12 +219,16 @@ public sealed class NiftyOrbPollHostedService : BackgroundService
                 || string.IsNullOrEmpty(r.SignalSource));
             var combo = recs.FirstOrDefault(r => r.SignalSource == "nifty_orb_liq_v2");
             var liqBo = recs.FirstOrDefault(r => r.SignalSource == "nifty_liq_breakout");
+            var brkVol = recs.FirstOrDefault(r => r.SignalSource == "nifty_breakout_volume");
+            var heroZero = recs.FirstOrDefault(r => r.SignalSource == "nifty_hero_zero");
             _logger.LogInformation(
-                "Nifty ORB auto-scan: run={Status} orb={OrbStatus} combo={ComboStatus} liqBo={LiqBoStatus}",
+                "Nifty ORB auto-scan: run={Status} orb={OrbStatus} combo={ComboStatus} liqBo={LiqBoStatus} brkVol={BrkVolStatus} heroZero={HeroZeroStatus}",
                 run.Status,
                 orb?.Status ?? "(none)",
                 combo?.Status ?? "(none)",
-                liqBo?.Status ?? "(none)");
+                liqBo?.Status ?? "(none)",
+                brkVol?.Status ?? "(none)",
+                heroZero?.Status ?? "(none)");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

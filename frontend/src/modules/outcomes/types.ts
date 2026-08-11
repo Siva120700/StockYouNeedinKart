@@ -58,6 +58,10 @@ export function strategyLabel(strategy: string | null | undefined): string {
       return "Index Options (ORB + Liq V2)";
     case "nifty_liq_breakout":
       return "Index Options (Liq + Breakout)";
+    case "nifty_breakout_volume":
+      return "Index Options (Breakout + Volume)";
+    case "nifty_hero_zero":
+      return "Index Options (Hero Zero)";
     default:
       return strategy ?? "All";
   }

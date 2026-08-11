@@ -45,6 +45,8 @@ const ALL_OUTCOME_STRATEGIES = [
   "nifty_orb",
   "nifty_orb_liq_v2",
   "nifty_liq_breakout",
+  "nifty_breakout_volume",
+  "nifty_hero_zero",
 ] as const;
 
 type OutcomeStrategy = (typeof ALL_OUTCOME_STRATEGIES)[number];

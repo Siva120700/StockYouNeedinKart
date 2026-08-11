@@ -71,12 +71,25 @@ public sealed class NiftyOrbRepository : INiftyOrbRepository
     public async Task<IReadOnlyList<NiftyOrbRecommendationRow>> GetRecommendationsAsync(
         Guid userId, Guid? runId, CancellationToken ct = default)
     {
+        var includeNotified = runId is null;
+        var asOfDate = includeNotified
+            ? DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5)).DateTime)
+            : default(DateOnly?);
+
         const string sql = """
             WITH latest AS (
               SELECT id FROM nifty_orb_runs
               WHERE user_id = @userId AND status = 'succeeded'
               ORDER BY started_at DESC
               LIMIT 1
+            ),
+            notified AS (
+              SELECT DISTINCT recommendation_id
+              FROM index_option_notifications
+              WHERE @includeNotified
+                AND user_id = @userId
+                AND recommendation_id IS NOT NULL
+                AND as_of_date = @asOfDate
             )
             SELECT
               r.id AS Id,
@@ -127,7 +140,10 @@ public sealed class NiftyOrbRepository : INiftyOrbRepository
             WHERE r.user_id = @userId
               AND (
                 (@runId IS NOT NULL AND r.run_id = @runId)
-                OR (@runId IS NULL AND r.run_id = (SELECT id FROM latest))
+                OR (@runId IS NULL AND (
+                  r.run_id = (SELECT id FROM latest)
+                  OR r.id IN (SELECT recommendation_id FROM notified)
+                ))
               )
             ORDER BY
               CASE r.status WHEN 'recommended' THEN 0 WHEN 'waiting' THEN 1 ELSE 2 END,
@@ -137,7 +153,10 @@ public sealed class NiftyOrbRepository : INiftyOrbRepository
         using var conn = _db.CreateConnection();
         await SetUserAsync(conn, userId);
         var rows = await conn.QueryAsync<NiftyOrbRecommendationRow>(
-            new CommandDefinition(sql, new { userId, runId }, cancellationToken: ct));
+            new CommandDefinition(
+                sql,
+                new { userId, runId, includeNotified, asOfDate },
+                cancellationToken: ct));
         return rows.ToList();
     }
 

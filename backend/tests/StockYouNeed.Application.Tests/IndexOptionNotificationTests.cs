@@ -70,4 +70,18 @@ public class IndexOptionNotificationTests
         };
         Assert.True(IndexOptionNotificationService.IsHighProbability(rec));
     }
+
+    [Fact]
+    public void IsHighProbability_BreakoutVolumeNotifiesAt80()
+    {
+        var rec = new NiftyOrbRecommendationRow
+        {
+            Status = "recommended",
+            SignalSource = NiftyOrbService.SourceBreakoutVolume,
+            ConfidenceScore = 80,
+            ContractStrike = 25000m,
+            PremiumLtp = 160m,
+        };
+        Assert.True(IndexOptionNotificationService.IsHighProbability(rec));
+    }
 }

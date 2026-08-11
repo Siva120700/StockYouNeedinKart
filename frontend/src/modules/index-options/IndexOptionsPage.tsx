@@ -25,6 +25,19 @@ import {
 const SOURCE_ORB = "nifty_orb";
 const SOURCE_COMBO = "nifty_orb_liq_v2";
 const SOURCE_LIQ_BO = "nifty_liq_breakout";
+const SOURCE_BRK_VOL = "nifty_breakout_volume";
+const SOURCE_HERO_ZERO = "nifty_hero_zero";
+const POLL_MS = 45_000;
+
+function isMarketHoursIst(): boolean {
+  const ist = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }),
+  );
+  const day = ist.getDay();
+  if (day === 0 || day === 6) return false;
+  const mins = ist.getHours() * 60 + ist.getMinutes();
+  return mins >= 9 * 60 + 10 && mins <= 15 * 60 + 35;
+}
 
 function fmt(n: number | null | undefined, d = 2): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
@@ -39,6 +52,8 @@ function fmtDelta(n: number | null | undefined, d = 3): string {
 function sourceLabel(source: string): string {
   if (source === SOURCE_COMBO) return "ORB + Liquidity V2";
   if (source === SOURCE_LIQ_BO) return "Liquidity + Breakout";
+  if (source === SOURCE_BRK_VOL) return "Breakout + Volume";
+  if (source === SOURCE_HERO_ZERO) return "Hero Zero";
   return "Nifty ORB";
 }
 
@@ -131,6 +146,8 @@ function DetailPanel({
 }) {
   const isCombo = row.signalSource === SOURCE_COMBO;
   const isLiqBo = row.signalSource === SOURCE_LIQ_BO;
+  const isBrkVol = row.signalSource === SOURCE_BRK_VOL;
+  const isHeroZero = row.signalSource === SOURCE_HERO_ZERO;
   return (
     <Box
       sx={{
@@ -204,12 +221,16 @@ function DetailPanel({
           <Typography variant="subtitle2" gutterBottom>
             {isLiqBo
               ? "Nifty levels vs strike chart (ticket = strike premium)"
-              : isCombo
+              : isBrkVol
+                ? "Nifty Breakout + volume (Δ × Nifty option ticket)"
+                : isHeroZero
+                  ? "Hero Zero — far OTM lottery (full premium at risk)"
+                  : isCombo
                 ? "Composed Nifty levels (ORB + Liq V2)"
                 : "Nifty ORB (structure)"}
           </Typography>
           <Typography variant="body2">Spot: {fmt(row.spotLtp)}</Typography>
-          {!isLiqBo && (
+          {!isLiqBo && !isBrkVol && !isHeroZero && (
             <Typography variant="body2">
               OR: {fmt(row.orbLow)} – {fmt(row.orbHigh)} ({fmt(row.orbRange, 1)} pts)
             </Typography>
@@ -287,27 +308,34 @@ export default function IndexOptionsPage() {
   const [expandedOrbId, setExpandedOrbId] = useState<string | null>(null);
   const [expandedComboId, setExpandedComboId] = useState<string | null>(null);
   const [expandedLiqBoId, setExpandedLiqBoId] = useState<string | null>(null);
+  const [expandedBrkVolId, setExpandedBrkVolId] = useState<string | null>(null);
+  const [expandedHeroZeroId, setExpandedHeroZeroId] = useState<string | null>(null);
 
-  async function refresh() {
-    setError(null);
-    setIsSyncing(true);
+  async function refresh(silent = false) {
+    if (!silent) setError(null);
+    if (!silent) setIsSyncing(true);
     try {
-      const [recs, ratesOrb, ratesCombo, ratesLiqBo] = await Promise.all([
+      const [recs, ratesOrb, ratesCombo, ratesLiqBo, ratesBrkVol, ratesHeroZero] =
+        await Promise.all([
         IndexOptionsApi.fetchRecommendations(),
         loadHistoricalHitRates("nifty_orb"),
         loadHistoricalHitRates("nifty_orb_liq_v2"),
         loadHistoricalHitRates("nifty_liq_breakout"),
+        loadHistoricalHitRates("nifty_breakout_volume"),
+        loadHistoricalHitRates("nifty_hero_zero"),
       ]);
       setRows(recs);
       const merged = new Map(ratesOrb);
       for (const [k, v] of ratesCombo) merged.set(k, v);
       for (const [k, v] of ratesLiqBo) merged.set(k, v);
+      for (const [k, v] of ratesBrkVol) merged.set(k, v);
+      for (const [k, v] of ratesHeroZero) merged.set(k, v);
       setHitRates(merged);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (!silent) setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
-      setIsSyncing(false);
+      if (!silent) setIsSyncing(false);
     }
   }
 
@@ -342,13 +370,39 @@ export default function IndexOptionsPage() {
     return list.filter((r) => r.status === statusFilter);
   }, [rows, statusFilter]);
 
+  const brkVolRows = useMemo(() => {
+    const list = rows.filter((r) => r.signalSource === SOURCE_BRK_VOL);
+    if (statusFilter === "all") return list;
+    return list.filter((r) => r.status === statusFilter);
+  }, [rows, statusFilter]);
+
+  const heroZeroRows = useMemo(() => {
+    const list = rows.filter((r) => r.signalSource === SOURCE_HERO_ZERO);
+    if (statusFilter === "all") return list;
+    return list.filter((r) => r.status === statusFilter);
+  }, [rows, statusFilter]);
+
   const columns = useMemo(() => buildColumns(), []);
 
   useEffect(() => {
     setTitle("Index Options");
     setBreadcrumbs([{ label: "Home" }, { label: "Index Options" }]);
     void refresh();
-    return () => setPageActions(null);
+
+    const poll = () => {
+      if (isMarketHoursIst() || document.visibilityState === "visible") void refresh(true);
+    };
+    const intervalId = window.setInterval(poll, POLL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      setPageActions(null);
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -408,12 +462,32 @@ export default function IndexOptionsPage() {
 
       <SectionTable
         title="Liquidity + Breakout"
-        blurb="Nifty Liq V2 + Breakout charts give Nifty entry / SL / T1. ATM and 1ITM 15-min charts are scored against those levels (Δ × Nifty risk/target vs premium SL and +15/+20). Highest match ≥70 wins — the trade ticket is always the strike chart: premium entry, SL, T1 +15 / T2 +20."
+        blurb="When Liq V2 and Breakout agree on side → Δ × Nifty option ticket (1 ITM + ATM). Single-engine setups use strike premium chart with match ≥55. Flat by 14:30 IST."
         rows={liqBoRows}
         columns={columns}
         loading={loading}
         expandedId={expandedLiqBoId}
         onExpand={setExpandedLiqBoId}
+      />
+
+      <SectionTable
+        title="Breakout + Volume"
+        blurb="Nifty 2-day high/low breakout with volume confirmation only (no Liquidity V2). Option ticket via Δ × Nifty entry / SL / T1 — same 1 ITM + ATM alt as ORB. High-probability (≥80) triggers bell alerts."
+        rows={brkVolRows}
+        columns={columns}
+        loading={loading}
+        expandedId={expandedBrkVolId}
+        onExpand={setExpandedBrkVolId}
+      />
+
+      <SectionTable
+        title="Hero Zero"
+        blurb="Far OTM lottery when ORB break and/or Breakout+Volume gives a clear direction. Buy cheap CE/PE (₹8–₹45, Δ 0.04–0.22) — risk full premium, targets 2× / 3× / 5× premium. Speculative only; no bell alerts. Flat by 14:30 IST."
+        rows={heroZeroRows}
+        columns={columns}
+        loading={loading}
+        expandedId={expandedHeroZeroId}
+        onExpand={setExpandedHeroZeroId}
       />
     </Stack>
   );

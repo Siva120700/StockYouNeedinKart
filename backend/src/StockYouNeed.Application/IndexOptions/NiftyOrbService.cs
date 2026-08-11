@@ -9,7 +9,7 @@ using StockYouNeed.Domain;
 namespace StockYouNeed.Application.IndexOptions;
 
 /// <summary>
-/// Nifty index options: ORB, ORB+Liquidity V2, and Liquidity V2+Breakout.
+/// Nifty index options: ORB, ORB+Liquidity V2, Liquidity V2+Breakout, Breakout+Volume, and Hero Zero.
 /// Each section uses the same premium ticket (1 ITM CE/PE + Δ × Nifty levels).
 /// </summary>
 public sealed class NiftyOrbService
@@ -17,6 +17,8 @@ public sealed class NiftyOrbService
     public const string SourceOrb = "nifty_orb";
     public const string SourceOrbLiqV2 = "nifty_orb_liq_v2";
     public const string SourceLiqBreakout = "nifty_liq_breakout";
+    public const string SourceBreakoutVolume = "nifty_breakout_volume";
+    public const string SourceHeroZero = "nifty_hero_zero";
     private const decimal MaxBidAskSpreadPct = 5m;
     /// <summary>Wider than equity confluence — index entries can sit ~0.5% apart.</summary>
     private const decimal ComboPriceTolerancePct = 0.005m;
@@ -141,6 +143,10 @@ public sealed class NiftyOrbService
                 var liqInputsEarly = await LoadLiqInputsAsync(nifty, niftyToken, ct);
                 await TryPersistLiqBreakoutAsync(
                     runId, userId, nifty, niftyToken, asOf, spot, liqInputsEarly, ct);
+                await TryPersistBreakoutVolumeAsync(
+                    runId, userId, nifty, asOf, spot, liqInputsEarly, ct);
+                await TryPersistHeroZeroAsync(
+                    runId, userId, nifty, asOf, spot, orbSetups, liqInputsEarly, ct);
             }
             else
             {
@@ -177,6 +183,10 @@ public sealed class NiftyOrbService
 
                 await TryPersistLiqBreakoutAsync(
                     runId, userId, nifty, niftyToken, asOf, spot, liqInputs, ct);
+                await TryPersistBreakoutVolumeAsync(
+                    runId, userId, nifty, asOf, spot, liqInputs, ct);
+                await TryPersistHeroZeroAsync(
+                    runId, userId, nifty, asOf, spot, orbSetups, liqInputs, ct);
             }
 
             await _repo.CompleteRunAsync(runId, userId, "succeeded", null, ct);
@@ -391,18 +401,295 @@ public sealed class NiftyOrbService
         var niftyT3 = liq?.TargetT3 ?? brk?.TargetT3 ?? 0;
 
         niftyReasons.Insert(0,
-            "Nifty chart levels + strike chart — ticket uses strike premium when match ≥70");
+            "Nifty chart levels + strike chart — ticket uses strike premium when match ≥55");
+
+        var bothAgree = liq is not null && brk is not null
+            && string.Equals(liq.Side, brk.Side, StringComparison.OrdinalIgnoreCase);
+
+        if (bothAgree)
+        {
+            niftyReasons.Insert(0,
+                "Liq V2 + Breakout same side — Δ × Nifty option ticket (1 ITM + ATM alt)");
+            await TryBuildAndPersistTicketAsync(
+                runId, userId, nifty.Id, SourceLiqBreakout, side, spot,
+                0, 0, 0, niftyEntry, niftySl, niftyT1, niftyT2, niftyT3,
+                niftyReasons,
+                confidence: niftyEntriesAlign ? 78 : 72,
+                ct);
+            return;
+        }
 
         await TryPersistPremiumStrikeTicketAsync(
             runId, userId, nifty.Id, SourceLiqBreakout, side, spot, asOf,
             niftyEntry, niftySl, niftyT1, niftyT2, niftyT3,
-            niftyReasons, bothEngines, niftyEntriesAlign, ct);
+            niftyReasons, bothEngines, niftyEntriesAlign,
+            minMatchScore: 55, ct);
+    }
+
+    /// <summary>
+    /// Nifty daily breakout (2d high/low) with volume confirmation → Δ × Nifty option ticket.
+    /// No Liquidity V2 requirement.
+    /// </summary>
+    private async Task TryPersistBreakoutVolumeAsync(
+        Guid runId, Guid userId, Instrument nifty,
+        DateOnly asOf, decimal spot,
+        (List<MarketIntradayBarRow> Bars1h, List<LiquidityAnalysisService.Ohlcv> Bars4h, List<MarketBarRow> Daily) inputs,
+        CancellationToken ct)
+    {
+        var daily = inputs.Daily;
+        if (daily.Count < 5)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceBreakoutVolume, SignalSides.Buy, spot,
+                0, 0, 0, spot, spot, null, null, null,
+                new List<string> { "Need Nifty daily bars for breakout" },
+                "Insufficient Nifty daily history", ct);
+            return;
+        }
+
+        var brk = BreakoutSignalEvaluator.Evaluate(
+            userId, runId, asOf, daily,
+            livePrice: spot > 0 ? spot : null,
+            actionableOnly: false,
+            projectPartialSessionVolume: true);
+
+        if (brk is null)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceBreakoutVolume, SignalSides.Buy, spot,
+                0, 0, 0, spot, spot, null, null, null,
+                new List<string> { "Nifty Breakout none (no 2d high/low break)" },
+                "No Nifty breakout setup", ct);
+            return;
+        }
+
+        if (!brk.VolumeOk)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceBreakoutVolume, brk.Side, spot,
+                0, 0, 0, brk.EntryPrice, brk.InitialStopLoss,
+                brk.TargetT1, brk.TargetT2, brk.TargetT3,
+                new List<string> { $"Nifty Breakout {brk.Side} but volume below 25% of prior 3-day avg" },
+                "Breakout without volume confirmation", ct);
+            return;
+        }
+
+        if (brk.TargetT1 is not decimal t1)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceBreakoutVolume, brk.Side, spot,
+                0, 0, 0, brk.EntryPrice, brk.InitialStopLoss, null, null, null,
+                new List<string> { "Breakout targets already spent on live mark" },
+                "Breakout setup spent", ct);
+            return;
+        }
+
+        var reasons = new List<string>
+        {
+            "Nifty 2d high/low breakout + volume OK (no Liquidity V2)",
+            $"Breakout {brk.Side} entry {brk.EntryPrice:0.00} · SL {brk.InitialStopLoss:0.00} · T1 {t1:0.00}",
+            "Option ticket via Δ × Nifty levels (1 ITM primary + ATM alt)",
+            "Option buying only — flat by 14:30 IST",
+        };
+
+        await TryBuildAndPersistTicketAsync(
+            runId, userId, nifty.Id, SourceBreakoutVolume, brk.Side, spot,
+            0, 0, 0,
+            brk.EntryPrice, brk.InitialStopLoss, t1, brk.TargetT2 ?? 0, brk.TargetT3 ?? 0,
+            reasons, confidence: 75, ct);
+    }
+
+    /// <summary>
+    /// Hero Zero: far OTM lottery when ORB and/or Breakout+Volume gives a directional catalyst.
+    /// Risk = full premium; targets = 2× / 3× / 5× premium. No bell alerts (speculative).
+    /// </summary>
+    private async Task TryPersistHeroZeroAsync(
+        Guid runId, Guid userId, Instrument nifty,
+        DateOnly asOf, decimal spot,
+        IReadOnlyList<NiftyOrbEvaluator.OrbLevels> orbSetups,
+        (List<MarketIntradayBarRow> Bars1h, List<LiquidityAnalysisService.Ohlcv> Bars4h, List<MarketBarRow> Daily) inputs,
+        CancellationToken ct)
+    {
+        var daily = inputs.Daily;
+        AnalysisSignalRow? brk = daily.Count >= 5
+            ? BreakoutSignalEvaluator.Evaluate(
+                userId, runId, asOf, daily,
+                livePrice: spot > 0 ? spot : null,
+                actionableOnly: false,
+                projectPartialSessionVolume: true)
+            : null;
+
+        var catalysts = NiftyHeroZeroEvaluator.CollectCatalysts(orbSetups, brk);
+        var setup = NiftyHeroZeroEvaluator.ResolveSetup(catalysts, orbSetups, brk);
+
+        if (setup is null)
+        {
+            var reason = catalysts.Count == 0
+                ? "Need ORB break or Breakout+Volume catalyst"
+                : "Conflicting buy/sell catalysts — Hero Zero needs one clear side";
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceHeroZero, SignalSides.Buy, spot,
+                0, 0, 0, spot, spot, null, null, null,
+                new List<string> { reason }, reason, ct);
+            return;
+        }
+
+        var nfo = await _nfo.GetNfoForUnderlyingAsync(nifty.Id, ct);
+        var options = nfo.Where(c => c.Kind == "option").ToList();
+        if (options.Count == 0)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceHeroZero, setup.Side, spot,
+                0, 0, 0, setup.NiftyEntry, setup.NiftySl, setup.NiftyT1, null, null,
+                setup.CatalystLabels, "No Nifty OPTIDX contracts mapped", ct);
+            return;
+        }
+
+        var nearestExpiry = options.Min(o => o.Expiry);
+        var expiryContracts = options.Where(o => o.Expiry == nearestExpiry).ToList();
+        var expiryLabel = expiryContracts[0].ExpiryLabel;
+        var angelName = expiryContracts[0].AngelName;
+
+        var greeks = await _angel.GetOptionGreeksAsync(angelName, expiryLabel, ct);
+        if (greeks.Count == 0)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceHeroZero, setup.Side, spot,
+                0, 0, 0, setup.NiftyEntry, setup.NiftySl, setup.NiftyT1, null, null,
+                setup.CatalystLabels, $"optionGreek unavailable ({angelName} {expiryLabel})", ct);
+            return;
+        }
+
+        var candidate = HeroZeroStrikeSelector.SelectFarOtm(
+            setup.Side, spot, greeks, expiryContracts, expiryLabel);
+        if (candidate?.Contract?.SymbolToken is null)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceHeroZero, setup.Side, spot,
+                0, 0, 0, setup.NiftyEntry, setup.NiftySl, setup.NiftyT1, null, null,
+                setup.CatalystLabels,
+                $"No far OTM strike (Δ {HeroZeroStrikeSelector.MinDelta:0.00}–{HeroZeroStrikeSelector.MaxDelta:0.00}, vol ≥{HeroZeroStrikeSelector.MinTradeVolume:0})",
+                ct);
+            return;
+        }
+
+        await Task.Delay(TimeSpan.FromMilliseconds(800), ct);
+        var quote = await QuoteNfoAsync(candidate.Contract.SymbolToken, ct);
+        if (quote.Ltp is null or <= 0)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceHeroZero, setup.Side, spot,
+                0, 0, 0, setup.NiftyEntry, setup.NiftySl, setup.NiftyT1, null, null,
+                setup.CatalystLabels, "Far OTM premium quote unavailable", ct);
+            return;
+        }
+
+        if (!HeroZeroStrikeSelector.PremiumInBand(quote.Ltp.Value))
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceHeroZero, setup.Side, spot,
+                0, 0, 0, setup.NiftyEntry, setup.NiftySl, setup.NiftyT1, null, null,
+                setup.CatalystLabels,
+                $"Premium ₹{quote.Ltp:0.00} outside Hero Zero band ₹{HeroZeroStrikeSelector.MinPremium:0}–₹{HeroZeroStrikeSelector.MaxPremium:0}",
+                ct);
+            return;
+        }
+
+        var spreadPct = SpreadPct(quote.Bid, quote.Ask);
+        if (spreadPct is null || spreadPct > 8m)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceHeroZero, setup.Side, spot,
+                0, 0, 0, setup.NiftyEntry, setup.NiftySl, setup.NiftyT1, null, null,
+                setup.CatalystLabels,
+                spreadPct is null
+                    ? "Far OTM bid/ask depth unavailable"
+                    : $"Bid/ask spread {spreadPct:0.00}% exceeds 8% (OTM)",
+                ct);
+            return;
+        }
+
+        var ticket = NiftyHeroZeroEvaluator.BuildPremiumTicket(quote.Ltp.Value);
+        var longDelta = OptionStrikeSelector.ToLongOptionDelta(candidate.Delta) ?? candidate.Delta ?? 0.1m;
+        var reasons = setup.CatalystLabels
+            .Select(l => $"Catalyst: {l}")
+            .Concat(ticket.Reasons)
+            .Concat(new[]
+            {
+                $"Far OTM {candidate.Strike:0.##} {candidate.OptionType} · Δ {longDelta:0.00}",
+                $"Bid/ask {spreadPct:0.00}% · vol {candidate.Volume:0}",
+                "Not for bell alerts — speculative sizing only",
+            })
+            .ToArray();
+
+        var row = new NiftyOrbRecommendationRow
+        {
+            Id = Guid.NewGuid(),
+            RunId = runId,
+            UserId = userId,
+            InstrumentId = nifty.Id,
+            AppSymbol = "NIFTY",
+            InstrumentName = "Nifty 50",
+            Side = setup.Side,
+            SignalSource = SourceHeroZero,
+            Status = "recommended",
+            SpotLtp = spot,
+            UnderlyingEntry = setup.NiftyEntry,
+            UnderlyingStopLoss = setup.NiftySl,
+            UnderlyingTargetT1 = setup.NiftyT1,
+            ConfidenceScore = setup.Confidence,
+            Reasons = reasons,
+            ContractTradingSymbol = candidate.Contract.TradingSymbol,
+            ContractExpiryLabel = expiryLabel,
+            ContractStrike = candidate.Strike,
+            ContractOptionType = candidate.OptionType,
+            ContractToken = candidate.Contract.SymbolToken,
+            ContractLotSize = candidate.Contract.LotSize,
+            PremiumLtp = ticket.Entry,
+            PremiumStopLoss = ticket.StopLoss,
+            PremiumTargetT1 = ticket.TargetT1,
+            PremiumTargetT2 = ticket.TargetT2,
+            PremiumTargetT3 = ticket.TargetT3,
+            Delta = longDelta,
+            Gamma = candidate.Gamma,
+            Theta = candidate.Theta,
+            Vega = candidate.Vega,
+            ImpliedVolatility = candidate.Iv,
+            TradeVolume = candidate.Volume,
+            FlatByIst = "14:30",
+        };
+
+        await _repo.InsertRecommendationAsync(row, ct);
+        await _outcomes.OpenAsync(new SignalOutcomeRow
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            InstrumentId = nifty.Id,
+            AppSymbol = "NIFTY",
+            InstrumentName = "Nifty 50",
+            Strategy = SourceHeroZero,
+            Side = setup.Side,
+            SignalDate = asOf,
+            EntryPrice = ticket.Entry,
+            InitialStopLoss = ticket.StopLoss,
+            TargetT1 = ticket.TargetT1,
+            TargetT2 = ticket.TargetT2,
+            TargetT3 = ticket.TargetT3,
+            SectorConfirmed = false,
+        }, ct);
+
+        _logger.LogInformation(
+            "Hero Zero: {Side} {Strike}{Type} @ ₹{Prem} catalyst={Catalysts}",
+            setup.Side, candidate.Strike, candidate.OptionType, ticket.Entry,
+            string.Join(", ", setup.CatalystLabels));
     }
 
     private async Task TryPersistPremiumStrikeTicketAsync(
         Guid runId, Guid userId, Guid instrumentId, string source, string side, decimal spot, DateOnly asOf,
         decimal niftyEntry, decimal niftySl, decimal niftyT1, decimal niftyT2, decimal niftyT3,
-        List<string> biasReasons, bool bothNiftyEngines, bool niftyEntriesAlign, CancellationToken ct)
+        List<string> biasReasons, bool bothNiftyEngines, bool niftyEntriesAlign,
+        int minMatchScore = NiftyPremiumStrikeEvaluator.MinMatchScore,
+        CancellationToken ct = default)
     {
         var nfo = await _nfo.GetNfoForUnderlyingAsync(instrumentId, ct);
         var options = nfo.Where(c => c.Kind == "option").ToList();
@@ -518,7 +805,7 @@ public sealed class NiftyOrbService
             .Concat(chosenChart.Reasons)
             .Concat(new[]
             {
-                $"Nifty↔strike match {matchScore}/100 (need ≥{NiftyPremiumStrikeEvaluator.MinMatchScore})",
+                $"Nifty↔strike match {matchScore}/100 (need ≥{minMatchScore})",
                 $"{chosen.Strike:0.##} {chosen.OptionType} · Δ {longDelta:0.00} · IV {chosen.Iv:0.0}%",
                 $"Bid/ask {SpreadPct(chosenQuote.Bid, chosenQuote.Ask):0.00}%",
                 "Ticket = strike chart entry/SL/T1 · Nifty levels for structure",
@@ -527,11 +814,11 @@ public sealed class NiftyOrbService
             .ToArray();
 
         if (chosenChart.Status != "recommended"
-            || matchScore < NiftyPremiumStrikeEvaluator.MinMatchScore)
+            || matchScore < minMatchScore)
         {
             var skip = chosenChart.Status != "recommended"
                 ? (chosenChart.SkipReason ?? chosenChart.Status)
-                : $"Nifty vs strike match {matchScore} below {NiftyPremiumStrikeEvaluator.MinMatchScore}";
+                : $"Nifty vs strike match {matchScore} below {minMatchScore}";
             var waitOrSkip = chosenChart.Status == "waiting" ? "waiting" : "skipped";
 
             await _repo.InsertRecommendationAsync(new NiftyOrbRecommendationRow
