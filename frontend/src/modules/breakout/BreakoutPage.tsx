@@ -10,6 +10,7 @@ import {
   loadHistoricalHitRates,
   type HitRateByInstrument,
 } from "../../utils/historicalHitRate";
+import { createSectorRsColumn } from "../../utils/sectorRelativeStrength.tsx";
 import { BreakoutApi } from "./api";
 import type { BreakoutConfirmation } from "./types";
 import { patternLabel } from "./types";
@@ -22,6 +23,7 @@ export default function BreakoutPage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [confirmedOnly, setConfirmedOnly] = useState(true);
+  const [hideLaggingRs, setHideLaggingRs] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -54,10 +56,11 @@ export default function BreakoutPage() {
     }
   }
 
-  const visible = useMemo(
-    () => (confirmedOnly ? rows.filter((r) => r.confirmed) : rows),
-    [rows, confirmedOnly],
-  );
+  const visible = useMemo(() => {
+    let list = confirmedOnly ? rows.filter((r) => r.confirmed) : rows;
+    if (hideLaggingRs) list = list.filter((r) => !r.sectorRs?.downranked);
+    return list;
+  }, [rows, confirmedOnly, hideLaggingRs]);
 
   useEffect(() => {
     setTitle("Breakout");
@@ -74,17 +77,22 @@ export default function BreakoutPage() {
           control={<Switch size="small" checked={confirmedOnly} onChange={(e) => setConfirmedOnly(e.target.checked)} />}
           label="Confirmed only"
         />
+        <FormControlLabel
+          control={<Switch size="small" checked={hideLaggingRs} onChange={(e) => setHideLaggingRs(e.target.checked)} />}
+          label="Hide lagging RS"
+        />
         <Button variant="contained" size="small" disabled={running} startIcon={<Play size={DEFAULT_SMALL_ICON_SIZE} />}
           onClick={() => void onRun()}>
           {running ? "Scanning…" : "Run breakout scan"}
         </Button>
       </Stack>,
     );
-  }, [running, confirmedOnly, setPageActions]);
+  }, [running, confirmedOnly, hideLaggingRs, setPageActions]);
 
   const columns = useMemo(
     () => [
       columnFactories.createTextColumn<BreakoutConfirmation>({ field: "appSymbol", headerName: "Symbol", width: 110, getValue: (r) => r.appSymbol }),
+      createSectorRsColumn<BreakoutConfirmation>((r) => r.sectorRs),
       createHistoricalHitRateColumn<BreakoutConfirmation>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<BreakoutConfirmation>(
         { buy: { label: "BUY", color: "#2e7d32" }, sell: { label: "SELL", color: "#c62828" } },

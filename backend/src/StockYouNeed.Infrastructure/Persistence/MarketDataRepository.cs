@@ -159,6 +159,90 @@ public sealed class MarketDataRepository : IMarketDataRepository
         return rows.ToList();
     }
 
+    public async Task<IReadOnlyList<SectorScopeQuoteRow>> GetSectorScopeQuotesAsync(CancellationToken ct = default)
+    {
+        const string sql = """
+            WITH ranked AS (
+              SELECT
+                b.instrument_id,
+                b.trade_date,
+                b.open,
+                b.close,
+                ROW_NUMBER() OVER (PARTITION BY b.instrument_id ORDER BY b.trade_date DESC) AS rn
+              FROM market_bars b
+            ),
+            ist_today AS (
+              SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Kolkata')::date AS d
+            )
+            SELECT
+              e.id AS InstrumentId,
+              e.symbol AS Symbol,
+              e.name AS Name,
+              e.kind AS Kind,
+              s.id AS SectorId,
+              s.symbol AS SectorSymbol,
+              s.name AS SectorName,
+              COALESCE(NULLIF(l.ltp, 0), NULLIF(o.ltp, 0), last.close) AS Ltp,
+              COALESCE(
+                CASE
+                  WHEN last.trade_date IS NOT NULL
+                       AND last.trade_date < (SELECT d FROM ist_today)
+                  THEN last.close
+                  ELSE prev.close
+                END,
+                CASE
+                  WHEN o.close IS NOT NULL AND o.close > 0
+                       AND (l.ltp IS NULL OR l.ltp = 0 OR o.close <> l.ltp)
+                  THEN o.close
+                END,
+                last.open
+              ) AS PrevClose
+            FROM instruments e
+            JOIN instruments s ON s.id = e.sector_instrument_id AND s.kind = 'sector_index' AND s.is_active
+            LEFT JOIN market_ltp l ON l.instrument_id = e.id
+            LEFT JOIN market_ohlc o ON o.instrument_id = e.id
+            LEFT JOIN ranked last ON last.instrument_id = e.id AND last.rn = 1
+            LEFT JOIN ranked prev ON prev.instrument_id = e.id AND prev.rn = 2
+            WHERE e.kind = 'equity' AND e.is_active
+
+            UNION ALL
+
+            SELECT
+              s.id AS InstrumentId,
+              s.symbol AS Symbol,
+              s.name AS Name,
+              s.kind AS Kind,
+              s.id AS SectorId,
+              s.symbol AS SectorSymbol,
+              s.name AS SectorName,
+              COALESCE(NULLIF(l.ltp, 0), NULLIF(o.ltp, 0), last.close) AS Ltp,
+              COALESCE(
+                CASE
+                  WHEN last.trade_date IS NOT NULL
+                       AND last.trade_date < (SELECT d FROM ist_today)
+                  THEN last.close
+                  ELSE prev.close
+                END,
+                CASE
+                  WHEN o.close IS NOT NULL AND o.close > 0
+                       AND (l.ltp IS NULL OR l.ltp = 0 OR o.close <> l.ltp)
+                  THEN o.close
+                END,
+                last.open
+              ) AS PrevClose
+            FROM instruments s
+            LEFT JOIN market_ltp l ON l.instrument_id = s.id
+            LEFT JOIN market_ohlc o ON o.instrument_id = s.id
+            LEFT JOIN ranked last ON last.instrument_id = s.id AND last.rn = 1
+            LEFT JOIN ranked prev ON prev.instrument_id = s.id AND prev.rn = 2
+            WHERE s.kind = 'sector_index' AND s.is_active
+            """;
+        using var conn = _db.CreateConnection();
+        var rows = await conn.QueryAsync<SectorScopeQuoteRow>(
+            new CommandDefinition(sql, cancellationToken: ct));
+        return rows.ToList();
+    }
+
     public async Task<IReadOnlyList<MarketBarRow>> GetBarsAsync(Guid? instrumentId, int limitDays, CancellationToken ct = default)
     {
         const string sql = """

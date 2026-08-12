@@ -1,5 +1,6 @@
 import { gql } from "../../api/client";
 import type { TradeConfidenceRun, TradeConfidenceScore } from "./types";
+import { SECTOR_RS_GQL } from "../../utils/sectorRelativeStrength.tsx";
 
 export const TradeScoreApi = {
   async fetchScores(): Promise<TradeConfidenceScore[]> {
@@ -12,6 +13,7 @@ export const TradeScoreApi = {
           reasons entryPrice initialStopLoss targetT1 targetT2 targetT3
           analysisSignalId liquiditySignalId
           breakoutConfirmed breakoutAdx breakoutRsi
+          ${SECTOR_RS_GQL}
         }
       }
     `);

@@ -12,6 +12,7 @@ import type {
   WatchlistItem,
 } from "./types";
 import { gql } from "./client";
+import { SECTOR_RS_GQL } from "../utils/sectorRelativeStrength.tsx";
 
 const BACKTEST_NOTE_FIELDS = `
   id instrumentId appSymbol instrumentName strategy side signalDate
@@ -46,6 +47,7 @@ export const DataFactory = {
         signals(runId: $runId) {
           id analysisRunId instrumentId appSymbol instrumentName side
           entryPrice initialStopLoss targetT1 targetT2 targetT3 volumeOk sectorConfirmed freshCross
+          ${SECTOR_RS_GQL}
         }
       }`,
       { runId: runId ?? null },
@@ -64,6 +66,7 @@ export const DataFactory = {
           nearestZoneType nearestZonePrice distancePct timeframeContext
           eventType zoneTags
           qualityScore confidenceRating sweepStrength atr14 scoreReasons
+          ${SECTOR_RS_GQL}
         }
       }`,
       { runId: runId ?? null, ruleset },

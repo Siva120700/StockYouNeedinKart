@@ -19,6 +19,7 @@ import {
   loadHistoricalHitRates,
   type HitRateByInstrument,
 } from "../utils/historicalHitRate";
+import { createSectorRsColumn } from "../utils/sectorRelativeStrength.tsx";
 
 function formatTarget(row: Signal, target: number | null | undefined) {
   if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice) return "";
@@ -56,6 +57,7 @@ export default function SignalsPage() {
   const [sectorCheck, setSectorCheck] = useState(false);
   const [riskRewardCheck, setRiskRewardCheck] = useState(false);
   const [freshCrossCheck, setFreshCrossCheck] = useState(false);
+  const [hideLaggingRs, setHideLaggingRs] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const signalExportColumns: ExportColumn<Signal>[] = useMemo(
@@ -133,6 +135,7 @@ export default function SignalsPage() {
     let list = rows;
     if (sectorCheck) list = list.filter((r) => r.sectorConfirmed);
     if (freshCrossCheck) list = list.filter((r) => r.freshCross);
+    if (hideLaggingRs) list = list.filter((r) => !r.sectorRs?.downranked);
     if (riskRewardCheck) {
       list = list.filter((r) => {
         const rr = riskRewardRatio(r);
@@ -140,7 +143,7 @@ export default function SignalsPage() {
       });
     }
     return list;
-  }, [rows, sectorCheck, riskRewardCheck, freshCrossCheck]);
+  }, [rows, sectorCheck, riskRewardCheck, freshCrossCheck, hideLaggingRs]);
 
   useEffect(() => {
     setTitle("Signals");
@@ -198,6 +201,17 @@ export default function SignalsPage() {
           control={
             <Switch
               size="small"
+              checked={hideLaggingRs}
+              onChange={(e) => setHideLaggingRs(e.target.checked)}
+            />
+          }
+          label="Hide lagging RS"
+          sx={{ mr: 1 }}
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
               checked={riskRewardCheck}
               onChange={(e) => setRiskRewardCheck(e.target.checked)}
             />
@@ -235,7 +249,7 @@ export default function SignalsPage() {
       </MuiStack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, loading, sectorCheck, riskRewardCheck, freshCrossCheck, visibleRows]);
+  }, [running, loading, sectorCheck, riskRewardCheck, freshCrossCheck, hideLaggingRs, visibleRows]);
 
   const columns = useMemo(() => {
     return [
@@ -245,6 +259,7 @@ export default function SignalsPage() {
         width: 120,
         getValue: (r) => r.appSymbol,
       }),
+      createSectorRsColumn<Signal>((r) => r.sectorRs),
       createHistoricalHitRateColumn<Signal>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<Signal>(
         {

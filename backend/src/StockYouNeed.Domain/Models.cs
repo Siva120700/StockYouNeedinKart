@@ -1,5 +1,65 @@
 namespace StockYouNeed.Domain;
 
+/// <summary>Live sector relative-strength overlay on equity signal rows (not persisted).</summary>
+public interface ISectorRanked
+{
+    Guid InstrumentId { get; }
+    string Side { get; }
+    SectorRelativeStrengthInfo? SectorRs { get; set; }
+}
+
+public sealed class SectorRelativeStrengthInfo
+{
+    public string? Symbol { get; set; }
+    public string? Name { get; set; }
+    public decimal? MedianChangePct { get; set; }
+    public int? Rank { get; set; }
+    public bool Lagging { get; set; }
+    public bool Downranked { get; set; }
+}
+
+public sealed class SectorScopeQuoteRow
+{
+    public Guid InstrumentId { get; set; }
+    public string Symbol { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Kind { get; set; } = "equity";
+    public Guid SectorId { get; set; }
+    public string SectorSymbol { get; set; } = "";
+    public string SectorName { get; set; } = "";
+    public decimal? Ltp { get; set; }
+    public decimal? PrevClose { get; set; }
+}
+
+public sealed class SectorScopeSnapshot
+{
+    public DateTimeOffset AsOf { get; set; }
+    public decimal? NiftyChangePct { get; set; }
+    public IReadOnlyList<SectorScopeSector> Sectors { get; set; } = Array.Empty<SectorScopeSector>();
+}
+
+public sealed class SectorScopeSector
+{
+    public Guid InstrumentId { get; set; }
+    public string Symbol { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public decimal MedianChangePct { get; set; }
+    public int Rank { get; set; }
+    public bool Lagging { get; set; }
+    public int ConstituentCount { get; set; }
+    public IReadOnlyList<SectorScopeStock> Stocks { get; set; } = Array.Empty<SectorScopeStock>();
+}
+
+public sealed class SectorScopeStock
+{
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string InstrumentName { get; set; } = "";
+    public decimal ChangePct { get; set; }
+    public decimal? Ltp { get; set; }
+}
+
 public sealed class Instrument
 {
     public Guid Id { get; set; }
@@ -90,7 +150,7 @@ public sealed class AnalysisRunRow
     public string? ErrorMessage { get; set; }
 }
 
-public sealed class AnalysisSignalRow
+public sealed class AnalysisSignalRow : ISectorRanked
 {
     public Guid Id { get; set; }
     public Guid AnalysisRunId { get; set; }
@@ -113,9 +173,10 @@ public sealed class AnalysisSignalRow
     public decimal? Ma5d { get; set; }
     public decimal? Last2dHigh { get; set; }
     public decimal? Last2dLow { get; set; }
+    public SectorRelativeStrengthInfo? SectorRs { get; set; }
 }
 
-public sealed class LiquiditySignalRow
+public sealed class LiquiditySignalRow : ISectorRanked
 {
     public Guid Id { get; set; }
     public Guid LiquidityRunId { get; set; }
@@ -153,10 +214,11 @@ public sealed class LiquiditySignalRow
     public string? SweepStrength { get; set; }
     public decimal? Atr14 { get; set; }
     public string[] ScoreReasons { get; set; } = Array.Empty<string>();
+    public SectorRelativeStrengthInfo? SectorRs { get; set; }
 }
 
 /// <summary>Signals + Liquidity Fresh overlap (Confluence menu).</summary>
-public sealed class ConfluenceSignalRow
+public sealed class ConfluenceSignalRow : ISectorRanked
 {
     public Guid Id { get; set; }
     public Guid UserId { get; set; }
@@ -178,10 +240,11 @@ public sealed class ConfluenceSignalRow
     public decimal LiquidityStopLoss { get; set; }
     public bool SectorConfirmed { get; set; }
     public bool FreshCross { get; set; }
+    public SectorRelativeStrengthInfo? SectorRs { get; set; }
 }
 
 /// <summary>Standalone breakout confirmation row (Breakout menu).</summary>
-public sealed class BreakoutConfirmationRow
+public sealed class BreakoutConfirmationRow : ISectorRanked
 {
     public Guid Id { get; set; }
     public Guid RunId { get; set; }
@@ -200,6 +263,7 @@ public sealed class BreakoutConfirmationRow
     public decimal? Atr { get; set; }
     public bool AtrExpansion { get; set; }
     public string? PatternType { get; set; }
+    public SectorRelativeStrengthInfo? SectorRs { get; set; }
 }
 
 public sealed class BreakoutAnalysisRunRow
@@ -222,7 +286,7 @@ public sealed class TradeConfidenceRunRow
 }
 
 /// <summary>Scored high-probability trade (Signals + Liquidity + Breakout + F&amp;O layers).</summary>
-public sealed class TradeConfidenceScoreRow
+public sealed class TradeConfidenceScoreRow : ISectorRanked
 {
     public Guid Id { get; set; }
     public Guid RunId { get; set; }
@@ -250,6 +314,7 @@ public sealed class TradeConfidenceScoreRow
     public bool BreakoutConfirmed { get; set; }
     public decimal? BreakoutAdx { get; set; }
     public decimal? BreakoutRsi { get; set; }
+    public SectorRelativeStrengthInfo? SectorRs { get; set; }
 }
 
 public sealed class OpenPositionRow
@@ -413,7 +478,7 @@ public sealed class OptionsIntradayRunRow
 }
 
 /// <summary>One Options Intraday idea: stock setup + recommended contract.</summary>
-public sealed class OptionsIntradayRecommendationRow
+public sealed class OptionsIntradayRecommendationRow : ISectorRanked
 {
     public Guid Id { get; set; }
     public Guid RunId { get; set; }
@@ -456,6 +521,7 @@ public sealed class OptionsIntradayRecommendationRow
     public string FlatByIst { get; set; } = "15:20";
     public Guid? LiquiditySignalId { get; set; }
     public Guid? AnalysisSignalId { get; set; }
+    public SectorRelativeStrengthInfo? SectorRs { get; set; }
 }
 
 /// <summary>One Nifty ORB index-options idea (option buying: primary 1 ITM + alt ATM).</summary>

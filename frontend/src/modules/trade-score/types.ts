@@ -1,3 +1,5 @@
+import type { SectorRelativeStrength } from "../../utils/sectorRelativeStrength.tsx";
+
 export type TradeConfidenceScore = {
   id: string;
   runId: string;
@@ -24,6 +26,7 @@ export type TradeConfidenceScore = {
   breakoutConfirmed: boolean;
   breakoutAdx?: number | null;
   breakoutRsi?: number | null;
+  sectorRs?: SectorRelativeStrength | null;
 };
 
 export type TradeConfidenceRun = {

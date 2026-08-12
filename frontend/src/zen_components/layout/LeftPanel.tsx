@@ -18,12 +18,14 @@ import {
   Notebook,
   Pulse,
   SidebarSimple,
+  SquaresFour,
 } from "@phosphor-icons/react";
 import { NavLink } from "react-router-dom";
 import { DEFAULT_ICON_SIZE } from "../../constants";
 
 const navItems = [
   { to: "/ltp", label: "Live LTP", icon: Pulse },
+  { to: "/sector-scope", label: "Sector Scope", icon: SquaresFour },
   { to: "/analyze", label: "Analyze Stock", icon: MagnifyingGlass },
   { to: "/news", label: "News", icon: Newspaper },
   { to: "/signals", label: "Signals", icon: ChartLine },

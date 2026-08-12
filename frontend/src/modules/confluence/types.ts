@@ -1,3 +1,5 @@
+import type { SectorRelativeStrength } from "../../utils/sectorRelativeStrength.tsx";
+
 export type ConfluenceSignal = {
   id: string;
   instrumentId: string;
@@ -18,4 +20,5 @@ export type ConfluenceSignal = {
   liquidityStopLoss: number;
   sectorConfirmed: boolean;
   freshCross: boolean;
+  sectorRs?: SectorRelativeStrength | null;
 };

@@ -1,5 +1,6 @@
 import { gql } from "../../api/client";
 import type { OptionsIntradayRecommendation, OptionsIntradayRun } from "./types";
+import { SECTOR_RS_GQL } from "../../utils/sectorRelativeStrength.tsx";
 
 const REC_FIELDS = `
   id runId instrumentId appSymbol instrumentName side signalSource status skipReason
@@ -8,6 +9,7 @@ const REC_FIELDS = `
   contractTradingSymbol contractExpiryLabel contractStrike contractOptionType contractLotSize
   premiumLtp delta gamma theta vega impliedVolatility tradeVolume
   altTradingSymbol altStrike altDelta altImpliedVolatility altPremiumLtp flatByIst
+  ${SECTOR_RS_GQL}
 `;
 
 export const OptionsIntradayApi = {

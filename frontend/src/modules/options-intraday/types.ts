@@ -1,3 +1,5 @@
+import type { SectorRelativeStrength } from "../../utils/sectorRelativeStrength.tsx";
+
 export type OptionsIntradayRecommendation = {
   id: string;
   runId: string;
@@ -36,6 +38,7 @@ export type OptionsIntradayRecommendation = {
   altImpliedVolatility: number | null;
   altPremiumLtp: number | null;
   flatByIst: string;
+  sectorRs?: SectorRelativeStrength | null;
 };
 
 export type OptionsIntradayRun = {

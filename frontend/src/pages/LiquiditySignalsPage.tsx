@@ -34,6 +34,7 @@ import {
   loadHistoricalHitRates,
   type HitRateByInstrument,
 } from "../utils/historicalHitRate";
+import { createSectorRsColumn } from "../utils/sectorRelativeStrength.tsx";
 
 type ScoredLiquiditySignal = LiquiditySignal & { score: number };
 
@@ -138,6 +139,7 @@ export default function LiquiditySignalsPage({
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [sectorCheck, setSectorCheck] = useState(false);
+  const [hideLaggingRs, setHideLaggingRs] = useState(false);
   const [riskRewardCheck, setRiskRewardCheck] = useState(false);
   const [requireRetest, setRequireRetest] = useState(false);
   const [requireRelativeStrength, setRequireRelativeStrength] = useState(false);
@@ -291,6 +293,7 @@ export default function LiquiditySignalsPage({
       score: liquidityScore(r),
     }));
     if (sectorCheck) list = list.filter((r) => r.sectorConfirmed);
+    if (hideLaggingRs) list = list.filter((r) => !r.sectorRs?.downranked);
     if (riskRewardCheck) {
       list = list.filter((r) => {
         const rr = riskRewardRatio(r);
@@ -303,8 +306,12 @@ export default function LiquiditySignalsPage({
     } else if (isV2 && eventFilter.length === 0) {
       list = [];
     }
-    return list.sort((a, b) => b.score - a.score);
-  }, [rows, sectorCheck, riskRewardCheck, isV2, eventFilter]);
+    return list.sort(
+      (a, b) =>
+        Number(a.sectorRs?.downranked) - Number(b.sectorRs?.downranked) ||
+        b.score - a.score,
+    );
+  }, [rows, sectorCheck, hideLaggingRs, riskRewardCheck, isV2, eventFilter]);
 
   function onEventFilterChange(event: SelectChangeEvent<string[]>) {
     const raw = event.target.value;
@@ -362,6 +369,17 @@ export default function LiquiditySignalsPage({
             />
           }
           label="Sector check"
+          sx={{ mr: 1 }}
+        />
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={hideLaggingRs}
+              onChange={(e) => setHideLaggingRs(e.target.checked)}
+            />
+          }
+          label="Hide lagging RS"
           sx={{ mr: 1 }}
         />
         <FormControlLabel
@@ -472,6 +490,7 @@ export default function LiquiditySignalsPage({
     running,
     loading,
     sectorCheck,
+    hideLaggingRs,
     riskRewardCheck,
     requireRetest,
     requireRelativeStrength,
@@ -528,6 +547,7 @@ export default function LiquiditySignalsPage({
         width: 110,
         getValue: (r) => r.appSymbol,
       }),
+      createSectorRsColumn<Scored>((r) => r.sectorRs),
       createHistoricalHitRateColumn<Scored>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<Scored>(
         {

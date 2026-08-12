@@ -26,6 +26,7 @@ public static class DependencyInjection
         services.AddScoped<Application.Breakout.BreakoutAnalysisService>();
         services.AddScoped<TradeConfidenceService>();
         services.AddScoped<AnalyzeStockService>();
+        services.AddScoped<Application.SectorScope.SectorScopeService>();
         services.AddScoped<BacktestService>();
         services.AddScoped<UniverseSeedService>();
         services.AddScoped<MarketNewsService>();

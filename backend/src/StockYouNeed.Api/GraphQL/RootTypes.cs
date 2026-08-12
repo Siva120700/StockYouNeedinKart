@@ -34,36 +34,42 @@ public sealed class Query
         Guid? runId,
         [Service] ICurrentUserAccessor user,
         [Service] IPortfolioRepository portfolio,
+        [Service] Application.SectorScope.SectorScopeService sectorScope,
         CancellationToken ct)
-        => await portfolio.GetSignalsAsync(user.UserId, runId, ct);
+        => await sectorScope.RankAsync(await portfolio.GetSignalsAsync(user.UserId, runId, ct), ct);
 
     public async Task<IReadOnlyList<LiquiditySignalRow>> LiquiditySignals(
         Guid? runId,
         string? ruleset,
         [Service] ICurrentUserAccessor user,
         [Service] IPortfolioRepository portfolio,
+        [Service] Application.SectorScope.SectorScopeService sectorScope,
         CancellationToken ct)
-        => await portfolio.GetLiquiditySignalsAsync(user.UserId, runId, ruleset ?? "classic", ct);
+        => await sectorScope.RankAsync(
+            await portfolio.GetLiquiditySignalsAsync(user.UserId, runId, ruleset ?? "classic", ct), ct);
 
     public async Task<IReadOnlyList<ConfluenceSignalRow>> ConfluenceSignals(
         [Service] ICurrentUserAccessor user,
         [Service] Application.Confluence.ConfluenceService confluence,
+        [Service] Application.SectorScope.SectorScopeService sectorScope,
         CancellationToken ct)
-        => await confluence.GetSignalsAsync(user.UserId, ct);
+        => await sectorScope.RankAsync(await confluence.GetSignalsAsync(user.UserId, ct), ct);
 
     public async Task<IReadOnlyList<BreakoutConfirmationRow>> BreakoutConfirmations(
         Guid? runId,
         [Service] ICurrentUserAccessor user,
         [Service] Application.Breakout.BreakoutAnalysisService breakout,
+        [Service] Application.SectorScope.SectorScopeService sectorScope,
         CancellationToken ct)
-        => await breakout.GetConfirmationsAsync(user.UserId, runId, ct);
+        => await sectorScope.RankAsync(await breakout.GetConfirmationsAsync(user.UserId, runId, ct), ct);
 
     public async Task<IReadOnlyList<TradeConfidenceScoreRow>> TradeConfidenceScores(
         Guid? runId,
         [Service] ICurrentUserAccessor user,
         [Service] TradeConfidenceService tradeScore,
+        [Service] Application.SectorScope.SectorScopeService sectorScope,
         CancellationToken ct)
-        => await tradeScore.GetScoresAsync(user.UserId, runId, ct);
+        => await sectorScope.RankAsync(await tradeScore.GetScoresAsync(user.UserId, runId, ct), ct);
 
     public async Task<AnalyzeStockResult> AnalyzeStock(
         Guid instrumentId,
@@ -100,17 +106,24 @@ public sealed class Query
         Guid? runId,
         [Service] ICurrentUserAccessor user,
         [Service] Application.OptionsIntraday.OptionsIntradayService options,
+        [Service] Application.SectorScope.SectorScopeService sectorScope,
         CancellationToken ct)
     {
         try
         {
-            return await options.GetRecommendationsAsync(user.UserId, runId, ct);
+            var recs = await options.GetRecommendationsAsync(user.UserId, runId, ct);
+            return await sectorScope.RankAsync(recs, ct);
         }
         catch (Exception ex)
         {
             throw new GraphQLException(ex.Message);
         }
     }
+
+    public async Task<SectorScopeSnapshot> SectorScope(
+        [Service] Application.SectorScope.SectorScopeService sectorScope,
+        CancellationToken ct)
+        => await sectorScope.GetSnapshotAsync(ct);
 
     public async Task<IReadOnlyList<NiftyOrbRecommendationRow>> NiftyOrbRecommendations(
         Guid? runId,

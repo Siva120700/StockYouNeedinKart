@@ -1,3 +1,5 @@
+import type { SectorRelativeStrength } from "../../utils/sectorRelativeStrength.tsx";
+
 export type BreakoutConfirmation = {
   id: string;
   runId: string;
@@ -11,6 +13,7 @@ export type BreakoutConfirmation = {
   level20d?: number | null;
   volumeRatio?: number | null;
   patternType?: string | null;
+  sectorRs?: SectorRelativeStrength | null;
 };
 
 export function patternLabel(patternType: string | null | undefined): string {

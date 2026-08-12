@@ -23,6 +23,7 @@ import {
   loadHistoricalHitRates,
   type HitRateByInstrument,
 } from "../../utils/historicalHitRate";
+import { createSectorRsColumn } from "../../utils/sectorRelativeStrength.tsx";
 
 function riskReward(row: TradeConfidenceScore): number | null {
   const entry = Number(row.entryPrice);
@@ -69,6 +70,7 @@ export default function TradeScorePage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [minScore, setMinScore] = useState(60);
+  const [hideLaggingRs, setHideLaggingRs] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -102,10 +104,11 @@ export default function TradeScorePage() {
     }
   }
 
-  const visibleRows = useMemo(
-    () => rows.filter((r) => r.confidenceScore >= minScore),
-    [rows, minScore],
-  );
+  const visibleRows = useMemo(() => {
+    let list = rows.filter((r) => r.confidenceScore >= minScore);
+    if (hideLaggingRs) list = list.filter((r) => !r.sectorRs?.downranked);
+    return list;
+  }, [rows, minScore, hideLaggingRs]);
 
   useEffect(() => {
     setTitle("Trade Score");
@@ -128,6 +131,16 @@ export default function TradeScorePage() {
           }
           label="Min ★★★★ (75+)"
         />
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={hideLaggingRs}
+              onChange={(e) => setHideLaggingRs(e.target.checked)}
+            />
+          }
+          label="Hide lagging RS"
+        />
         <Button
           variant="contained"
           size="small"
@@ -139,7 +152,7 @@ export default function TradeScorePage() {
         </Button>
       </Stack>,
     );
-  }, [running, minScore, setPageActions]);
+  }, [running, minScore, hideLaggingRs, setPageActions]);
 
   const columns = useMemo(
     () => [
@@ -162,6 +175,7 @@ export default function TradeScorePage() {
         width: 110,
         getValue: (r) => r.appSymbol,
       }),
+      createSectorRsColumn<TradeConfidenceScore>((r) => r.sectorRs),
       createHistoricalHitRateColumn<TradeConfidenceScore>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<TradeConfidenceScore>(
         {

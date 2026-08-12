@@ -1,6 +1,7 @@
 import { gql } from "../../api/client";
 import { ActionFactory } from "../../api/factories";
 import type { ConfluenceSignal } from "./types";
+import { SECTOR_RS_GQL } from "../../utils/sectorRelativeStrength.tsx";
 
 export const ConfluenceApi = {
   async fetchSignals(): Promise<ConfluenceSignal[]> {
@@ -12,6 +13,7 @@ export const ConfluenceApi = {
           analysisSignalId liquiditySignalId
           signalsEntry liquidityEntry signalsStopLoss liquidityStopLoss
           sectorConfirmed freshCross
+          ${SECTOR_RS_GQL}
         }
       }
     `);

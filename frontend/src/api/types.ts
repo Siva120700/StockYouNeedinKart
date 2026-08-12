@@ -1,3 +1,5 @@
+import type { SectorRelativeStrength } from "../utils/sectorRelativeStrength.tsx";
+
 export type LtpQuote = {
   instrumentId: string;
   appSymbol: string;
@@ -22,6 +24,7 @@ export type Signal = {
   volumeOk: boolean;
   sectorConfirmed: boolean;
   freshCross: boolean;
+  sectorRs?: SectorRelativeStrength | null;
 };
 
 export type LiquiditySignal = {
@@ -56,6 +59,7 @@ export type LiquiditySignal = {
   sweepStrength?: string | null;
   atr14?: number | null;
   scoreReasons?: string[] | null;
+  sectorRs?: SectorRelativeStrength | null;
 };
 
 export type OpenPosition = {

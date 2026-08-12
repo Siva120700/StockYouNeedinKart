@@ -10,6 +10,7 @@ import {
   loadHistoricalHitRates,
   type HitRateByInstrument,
 } from "../../utils/historicalHitRate";
+import { createSectorRsColumn } from "../../utils/sectorRelativeStrength.tsx";
 import { ConfluenceApi } from "./api";
 import type { ConfluenceSignal } from "./types";
 
@@ -32,6 +33,7 @@ export default function ConfluencePage() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [sectorCheck, setSectorCheck] = useState(false);
+  const [hideLaggingRs, setHideLaggingRs] = useState(false);
   const [rrCheck, setRrCheck] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,9 +70,10 @@ export default function ConfluencePage() {
   const visible = useMemo(() => {
     let list = [...rows];
     if (sectorCheck) list = list.filter((r) => r.sectorConfirmed);
+    if (hideLaggingRs) list = list.filter((r) => !r.sectorRs?.downranked);
     if (rrCheck) list = list.filter((r) => (riskReward(r) ?? 0) >= 1);
     return list;
-  }, [rows, sectorCheck, rrCheck]);
+  }, [rows, sectorCheck, hideLaggingRs, rrCheck]);
 
   useEffect(() => {
     setTitle("Confluence");
@@ -88,6 +91,10 @@ export default function ConfluencePage() {
           label="Sector"
         />
         <FormControlLabel
+          control={<Switch size="small" checked={hideLaggingRs} onChange={(e) => setHideLaggingRs(e.target.checked)} />}
+          label="Hide lagging RS"
+        />
+        <FormControlLabel
           control={<Switch size="small" checked={rrCheck} onChange={(e) => setRrCheck(e.target.checked)} />}
           label="R:R ≥ 1"
         />
@@ -97,11 +104,12 @@ export default function ConfluencePage() {
         </Button>
       </Stack>,
     );
-  }, [running, sectorCheck, rrCheck, setPageActions]);
+  }, [running, sectorCheck, hideLaggingRs, rrCheck, setPageActions]);
 
   const columns = useMemo(
     () => [
       columnFactories.createTextColumn<ConfluenceSignal>({ field: "appSymbol", headerName: "Symbol", width: 110, getValue: (r) => r.appSymbol }),
+      createSectorRsColumn<ConfluenceSignal>((r) => r.sectorRs),
       createHistoricalHitRateColumn<ConfluenceSignal>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<ConfluenceSignal>(
         { buy: { label: "BUY", color: "#2e7d32" }, sell: { label: "SELL", color: "#c62828" } },

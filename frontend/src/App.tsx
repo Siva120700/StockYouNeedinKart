@@ -9,6 +9,7 @@ import OptionsIntradayPage from "./modules/options-intraday/OptionsIntradayPage"
 import IndexOptionsPage from "./modules/index-options/IndexOptionsPage";
 import NewsPage from "./modules/news/NewsPage";
 import OutcomesPage from "./modules/outcomes/OutcomesPage";
+import SectorScopePage from "./modules/sector-scope/SectorScopePage";
 import TradeScorePage from "./modules/trade-score/TradeScorePage";
 import BacktestPage from "./pages/BacktestPage";
 import LiquiditySignalsPage from "./pages/LiquiditySignalsPage";
@@ -39,6 +40,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Navigate to="/ltp" replace />} />
               <Route path="/ltp" element={<LtpPage />} />
+              <Route path="/sector-scope" element={<SectorScopePage />} />
               <Route path="/analyze" element={<AnalyzeStockPage />} />
               <Route path="/news" element={<NewsPage />} />
               <Route path="/signals" element={<SignalsPage />} />

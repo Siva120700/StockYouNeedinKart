@@ -130,6 +130,7 @@ public interface IMarketDataRepository
     Task UpsertIntradayBarAsync(Guid instrumentId, string interval, DateTimeOffset barTime, decimal open, decimal high, decimal low, decimal close, long volume, CancellationToken ct = default);
     Task TrimMarketBarsOlderThanAsync(int keepTradingDaysApprox, CancellationToken ct = default);
     Task<IReadOnlyList<MarketLtpRow>> GetAllLtpAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<SectorScopeQuoteRow>> GetSectorScopeQuotesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<MarketBarRow>> GetBarsAsync(Guid? instrumentId, int limitDays, CancellationToken ct = default);
     Task<IReadOnlyList<MarketBarRow>> GetBarsForInstrumentAsync(Guid instrumentId, int limitDays, CancellationToken ct = default);
     Task<IReadOnlyList<MarketIntradayBarRow>> GetIntradayBarsForInstrumentAsync(Guid instrumentId, string interval, int limitBars, CancellationToken ct = default);

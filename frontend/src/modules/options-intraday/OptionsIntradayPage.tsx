@@ -7,6 +7,8 @@ import {
   Collapse,
   MenuItem,
   Stack,
+  Switch,
+  FormControlLabel,
   TextField,
   Typography,
 } from "@mui/material";
@@ -22,6 +24,7 @@ import {
   loadHistoricalHitRates,
   type HitRateByInstrument,
 } from "../../utils/historicalHitRate";
+import { createSectorRsColumn } from "../../utils/sectorRelativeStrength.tsx";
 
 function fmt(n: number | null | undefined, d = 2): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
@@ -43,6 +46,7 @@ export default function OptionsIntradayPage() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "recommended" | "skipped">("all");
+  const [hideLaggingRs, setHideLaggingRs] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   async function refresh() {
@@ -77,9 +81,10 @@ export default function OptionsIntradayPage() {
   }
 
   const visible = useMemo(() => {
-    if (statusFilter === "all") return rows;
-    return rows.filter((r) => r.status === statusFilter);
-  }, [rows, statusFilter]);
+    let list = statusFilter === "all" ? rows : rows.filter((r) => r.status === statusFilter);
+    if (hideLaggingRs) list = list.filter((r) => !r.sectorRs?.downranked);
+    return list;
+  }, [rows, statusFilter, hideLaggingRs]);
 
   useEffect(() => {
     setTitle("Options Intraday");
@@ -104,6 +109,16 @@ export default function OptionsIntradayPage() {
           <MenuItem value="recommended">Recommended</MenuItem>
           <MenuItem value="skipped">Skipped</MenuItem>
         </TextField>
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={hideLaggingRs}
+              onChange={(e) => setHideLaggingRs(e.target.checked)}
+            />
+          }
+          label="Hide lagging RS"
+        />
         <Button
           size="small"
           variant="contained"
@@ -116,7 +131,7 @@ export default function OptionsIntradayPage() {
       </Stack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, running]);
+  }, [statusFilter, hideLaggingRs, running]);
 
   const columns = useMemo(
     () => [
@@ -126,6 +141,7 @@ export default function OptionsIntradayPage() {
         width: 100,
         getValue: (r) => r.appSymbol,
       }),
+      createSectorRsColumn<OptionsIntradayRecommendation>((r) => r.sectorRs),
       createHistoricalHitRateColumn<OptionsIntradayRecommendation>(
         hitRates,
         (r) => r.instrumentId,
