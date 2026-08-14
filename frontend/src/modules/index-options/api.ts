@@ -1,5 +1,5 @@
 import { gql } from "../../api/client";
-import type { NiftyOrbRecommendation, NiftyOrbRun } from "./types";
+import type { NiftyOptionChainSnapshot, NiftyOrbRecommendation, NiftyOrbRun } from "./types";
 
 const REC_FIELDS = `
   id runId instrumentId appSymbol instrumentName side signalSource status skipReason
@@ -30,5 +30,19 @@ export const IndexOptionsApi = {
       }
     `);
     return data.runNiftyOrbAnalysis;
+  },
+
+  async fetchOptionChain(): Promise<NiftyOptionChainSnapshot> {
+    const data = await gql<{ niftyOptionChain: NiftyOptionChainSnapshot }>(`
+      query {
+        niftyOptionChain {
+          spot expiryLabel asOf usable
+          pcr callWallStrike callWallOi putWallStrike putWallOi maxPainStrike
+          totalCallOi totalPutOi
+          ladder { strike callOi putOi callLtp putLtp }
+        }
+      }
+    `);
+    return data.niftyOptionChain;
   },
 };

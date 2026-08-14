@@ -84,4 +84,32 @@ public class IndexOptionNotificationTests
         };
         Assert.True(IndexOptionNotificationService.IsHighProbability(rec));
     }
+
+    [Fact]
+    public void IsHighProbability_BreakoutChainNotifiesAt80()
+    {
+        var rec = new NiftyOrbRecommendationRow
+        {
+            Status = "recommended",
+            SignalSource = NiftyOrbService.SourceBreakoutChain,
+            ConfidenceScore = 82,
+            ContractStrike = 25000m,
+            PremiumLtp = 160m,
+        };
+        Assert.True(IndexOptionNotificationService.IsHighProbability(rec));
+    }
+
+    [Fact]
+    public void IsHighProbability_HeroZeroNeverNotifies()
+    {
+        var rec = new NiftyOrbRecommendationRow
+        {
+            Status = "recommended",
+            SignalSource = NiftyOrbService.SourceHeroZero,
+            ConfidenceScore = 90,
+            ContractStrike = 26000m,
+            PremiumLtp = 20m,
+        };
+        Assert.False(IndexOptionNotificationService.IsHighProbability(rec));
+    }
 }

@@ -16,7 +16,7 @@ import ZenTable from "../../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { IndexOptionsApi } from "./api";
-import type { NiftyOrbRecommendation } from "./types";
+import type { NiftyOptionChainSnapshot, NiftyOrbRecommendation } from "./types";
 import {
   loadHistoricalHitRates,
   type HitRateByInstrument,
@@ -26,6 +26,7 @@ const SOURCE_ORB = "nifty_orb";
 const SOURCE_COMBO = "nifty_orb_liq_v2";
 const SOURCE_LIQ_BO = "nifty_liq_breakout";
 const SOURCE_BRK_VOL = "nifty_breakout_volume";
+const SOURCE_BRK_CHAIN = "nifty_breakout_chain";
 const SOURCE_HERO_ZERO = "nifty_hero_zero";
 const POLL_MS = 45_000;
 
@@ -53,6 +54,7 @@ function sourceLabel(source: string): string {
   if (source === SOURCE_COMBO) return "ORB + Liquidity V2";
   if (source === SOURCE_LIQ_BO) return "Liquidity + Breakout";
   if (source === SOURCE_BRK_VOL) return "Breakout + Volume";
+  if (source === SOURCE_BRK_CHAIN) return "Breakout + Chain";
   if (source === SOURCE_HERO_ZERO) return "Hero Zero";
   return "Nifty ORB";
 }
@@ -252,6 +254,75 @@ function DetailPanel({
   );
 }
 
+function ChainPanel({ chain }: { chain: NiftyOptionChainSnapshot | null }) {
+  if (!chain) {
+    return (
+      <Alert severity="info">
+        Option chain loads with Run / refresh. PCR and OI walls gate Breakout + Chain tickets.
+      </Alert>
+    );
+  }
+  if (!chain.usable) {
+    return (
+      <Alert severity="warning">
+        Nearest-expiry Nifty OI ladder thin or unavailable
+        {chain.expiryLabel ? ` (${chain.expiryLabel})` : ""}. Breakout + Chain will skip until OI
+        quotes fill in.
+      </Alert>
+    );
+  }
+  const top = [...chain.ladder]
+    .sort((a, b) => Math.max(b.callOi, b.putOi) - Math.max(a.callOi, a.putOi))
+    .slice(0, 8);
+  return (
+    <Box
+      sx={{
+        p: 1.5,
+        border: "1px solid",
+        borderColor: "divider",
+        borderRadius: 1,
+      }}
+    >
+      <Typography variant="subtitle1" fontWeight={700} gutterBottom>
+        Nifty option chain · {chain.expiryLabel || "nearest"} · spot {fmt(chain.spot, 0)}
+      </Typography>
+      <Stack direction="row" flexWrap="wrap" gap={1} mb={1}>
+        <Chip size="small" label={`PCR ${chain.pcr != null ? chain.pcr.toFixed(2) : "—"}`} />
+        <Chip
+          size="small"
+          color="success"
+          variant="outlined"
+          label={`Put wall ${fmt(chain.putWallStrike, 0)} (${chain.putWallOi.toLocaleString()})`}
+        />
+        <Chip
+          size="small"
+          color="error"
+          variant="outlined"
+          label={`Call wall ${fmt(chain.callWallStrike, 0)} (${chain.callWallOi.toLocaleString()})`}
+        />
+        <Chip
+          size="small"
+          variant="outlined"
+          label={`Max pain ${fmt(chain.maxPainStrike, 0)}`}
+        />
+      </Stack>
+      <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
+        Top OI strikes (context for Breakout + Chain filter)
+      </Typography>
+      <Stack direction="row" flexWrap="wrap" gap={0.75}>
+        {top.map((r) => (
+          <Chip
+            key={r.strike}
+            size="small"
+            variant="outlined"
+            label={`${fmt(r.strike, 0)} C ${r.callOi.toLocaleString()} / P ${r.putOi.toLocaleString()}`}
+          />
+        ))}
+      </Stack>
+    </Box>
+  );
+}
+
 function SectionTable({
   title,
   blurb,
@@ -309,28 +380,42 @@ export default function IndexOptionsPage() {
   const [expandedComboId, setExpandedComboId] = useState<string | null>(null);
   const [expandedLiqBoId, setExpandedLiqBoId] = useState<string | null>(null);
   const [expandedBrkVolId, setExpandedBrkVolId] = useState<string | null>(null);
+  const [expandedBrkChainId, setExpandedBrkChainId] = useState<string | null>(null);
   const [expandedHeroZeroId, setExpandedHeroZeroId] = useState<string | null>(null);
+  const [chain, setChain] = useState<NiftyOptionChainSnapshot | null>(null);
 
   async function refresh(silent = false) {
     if (!silent) setError(null);
     if (!silent) setIsSyncing(true);
     try {
-      const [recs, ratesOrb, ratesCombo, ratesLiqBo, ratesBrkVol, ratesHeroZero] =
-        await Promise.all([
+      const [
+        recs,
+        ratesOrb,
+        ratesCombo,
+        ratesLiqBo,
+        ratesBrkVol,
+        ratesBrkChain,
+        ratesHeroZero,
+        chainSnap,
+      ] = await Promise.all([
         IndexOptionsApi.fetchRecommendations(),
         loadHistoricalHitRates("nifty_orb"),
         loadHistoricalHitRates("nifty_orb_liq_v2"),
         loadHistoricalHitRates("nifty_liq_breakout"),
         loadHistoricalHitRates("nifty_breakout_volume"),
+        loadHistoricalHitRates("nifty_breakout_chain"),
         loadHistoricalHitRates("nifty_hero_zero"),
+        IndexOptionsApi.fetchOptionChain().catch(() => null),
       ]);
       setRows(recs);
       const merged = new Map(ratesOrb);
       for (const [k, v] of ratesCombo) merged.set(k, v);
       for (const [k, v] of ratesLiqBo) merged.set(k, v);
       for (const [k, v] of ratesBrkVol) merged.set(k, v);
+      for (const [k, v] of ratesBrkChain) merged.set(k, v);
       for (const [k, v] of ratesHeroZero) merged.set(k, v);
       setHitRates(merged);
+      if (chainSnap) setChain(chainSnap);
     } catch (e) {
       if (!silent) setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -372,6 +457,12 @@ export default function IndexOptionsPage() {
 
   const brkVolRows = useMemo(() => {
     const list = rows.filter((r) => r.signalSource === SOURCE_BRK_VOL);
+    if (statusFilter === "all") return list;
+    return list.filter((r) => r.status === statusFilter);
+  }, [rows, statusFilter]);
+
+  const brkChainRows = useMemo(() => {
+    const list = rows.filter((r) => r.signalSource === SOURCE_BRK_CHAIN);
     if (statusFilter === "all") return list;
     return list.filter((r) => r.status === statusFilter);
   }, [rows, statusFilter]);
@@ -440,6 +531,8 @@ export default function IndexOptionsPage() {
     <Stack spacing={3} p={2}>
       {error && <Alert severity="error">{error}</Alert>}
 
+      <ChainPanel chain={chain} />
+
       <SectionTable
         title="Nifty ORB"
         blurb="30-min ORB (9:15–9:45). CE when OR high breaks · PE when OR low breaks — up to two independent tickets. High-probability strikes (score ≥80, combos ≥85) trigger bell + browser alerts. Flat by 14:30 IST."
@@ -478,6 +571,16 @@ export default function IndexOptionsPage() {
         loading={loading}
         expandedId={expandedBrkVolId}
         onExpand={setExpandedBrkVolId}
+      />
+
+      <SectionTable
+        title="Breakout + Chain"
+        blurb="Same pattern breakout + volume as above, then option-chain OI must agree (put wall / call wall / PCR). Only then emits strike · premium entry · SL · T1–T3. Confidence 82; ≥80 alerts. Flat by 14:30 IST."
+        rows={brkChainRows}
+        columns={columns}
+        loading={loading}
+        expandedId={expandedBrkChainId}
+        onExpand={setExpandedBrkChainId}
       />
 
       <SectionTable

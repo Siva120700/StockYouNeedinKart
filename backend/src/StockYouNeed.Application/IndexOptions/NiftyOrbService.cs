@@ -9,8 +9,9 @@ using StockYouNeed.Domain;
 namespace StockYouNeed.Application.IndexOptions;
 
 /// <summary>
-/// Nifty index options: ORB, ORB+Liquidity V2, Liquidity V2+Breakout, Breakout+Volume, and Hero Zero.
-/// Each section uses the same premium ticket (1 ITM CE/PE + Δ × Nifty levels).
+/// Nifty index options: ORB, ORB+Liquidity V2, Liquidity V2+Breakout, Breakout+Volume,
+/// Breakout+Chain, and Hero Zero.
+/// Each directional section uses the same premium ticket (1 ITM CE/PE + Δ × Nifty levels).
 /// </summary>
 public sealed class NiftyOrbService
 {
@@ -18,6 +19,7 @@ public sealed class NiftyOrbService
     public const string SourceOrbLiqV2 = "nifty_orb_liq_v2";
     public const string SourceLiqBreakout = "nifty_liq_breakout";
     public const string SourceBreakoutVolume = "nifty_breakout_volume";
+    public const string SourceBreakoutChain = "nifty_breakout_chain";
     public const string SourceHeroZero = "nifty_hero_zero";
     private const decimal MaxBidAskSpreadPct = 5m;
     /// <summary>Wider than equity confluence — index entries can sit ~0.5% apart.</summary>
@@ -33,6 +35,7 @@ public sealed class NiftyOrbService
     private readonly IntradayBarsSyncService _intradaySync;
     private readonly SignalOutcomeService _outcomes;
     private readonly IndexOptionNotificationService _notifications;
+    private readonly NiftyOptionChainService _chain;
     private readonly ILogger<NiftyOrbService> _logger;
 
     public NiftyOrbService(
@@ -45,6 +48,7 @@ public sealed class NiftyOrbService
         IntradayBarsSyncService intradaySync,
         SignalOutcomeService outcomes,
         IndexOptionNotificationService notifications,
+        NiftyOptionChainService chain,
         ILogger<NiftyOrbService> logger)
     {
         _instruments = instruments;
@@ -56,6 +60,7 @@ public sealed class NiftyOrbService
         _intradaySync = intradaySync;
         _outcomes = outcomes;
         _notifications = notifications;
+        _chain = chain;
         _logger = logger;
     }
 
@@ -145,6 +150,8 @@ public sealed class NiftyOrbService
                     runId, userId, nifty, niftyToken, asOf, spot, liqInputsEarly, ct);
                 await TryPersistBreakoutVolumeAsync(
                     runId, userId, nifty, asOf, spot, liqInputsEarly, ct);
+                await TryPersistBreakoutChainAsync(
+                    runId, userId, nifty, asOf, spot, liqInputsEarly, ct);
                 await TryPersistHeroZeroAsync(
                     runId, userId, nifty, asOf, spot, orbSetups, liqInputsEarly, ct);
             }
@@ -184,6 +191,8 @@ public sealed class NiftyOrbService
                 await TryPersistLiqBreakoutAsync(
                     runId, userId, nifty, niftyToken, asOf, spot, liqInputs, ct);
                 await TryPersistBreakoutVolumeAsync(
+                    runId, userId, nifty, asOf, spot, liqInputs, ct);
+                await TryPersistBreakoutChainAsync(
                     runId, userId, nifty, asOf, spot, liqInputs, ct);
                 await TryPersistHeroZeroAsync(
                     runId, userId, nifty, asOf, spot, orbSetups, liqInputs, ct);
@@ -497,6 +506,110 @@ public sealed class NiftyOrbService
             0, 0, 0,
             brk.EntryPrice, brk.InitialStopLoss, t1, brk.TargetT2 ?? 0, brk.TargetT3 ?? 0,
             reasons, confidence: 75, ct);
+    }
+
+    /// <summary>
+    /// Pattern breakout + volume, then option-chain OI gate (PCR / put-call walls).
+    /// Only recommends when chain agrees with breakout side → strike + premium ticket.
+    /// </summary>
+    private async Task TryPersistBreakoutChainAsync(
+        Guid runId, Guid userId, Instrument nifty,
+        DateOnly asOf, decimal spot,
+        (List<MarketIntradayBarRow> Bars1h, List<LiquidityAnalysisService.Ohlcv> Bars4h, List<MarketBarRow> Daily) inputs,
+        CancellationToken ct)
+    {
+        var daily = inputs.Daily;
+        if (daily.Count < 5)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceBreakoutChain, SignalSides.Buy, spot,
+                0, 0, 0, spot, spot, null, null, null,
+                new List<string> { "Need Nifty daily bars for breakout" },
+                "Insufficient Nifty daily history", ct);
+            return;
+        }
+
+        var brk = BreakoutSignalEvaluator.Evaluate(
+            userId, runId, asOf, daily,
+            livePrice: spot > 0 ? spot : null,
+            actionableOnly: false,
+            projectPartialSessionVolume: true);
+
+        if (brk is null)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceBreakoutChain, SignalSides.Buy, spot,
+                0, 0, 0, spot, spot, null, null, null,
+                new List<string> { "Nifty Breakout none (no 2d high/low break)" },
+                "No Nifty breakout setup", ct);
+            return;
+        }
+
+        if (!brk.VolumeOk)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceBreakoutChain, brk.Side, spot,
+                0, 0, 0, brk.EntryPrice, brk.InitialStopLoss,
+                brk.TargetT1, brk.TargetT2, brk.TargetT3,
+                new List<string> { $"Nifty Breakout {brk.Side} but volume below 25% of prior 3-day avg" },
+                "Breakout without volume confirmation", ct);
+            return;
+        }
+
+        if (brk.TargetT1 is not decimal t1)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceBreakoutChain, brk.Side, spot,
+                0, 0, 0, brk.EntryPrice, brk.InitialStopLoss, null, null, null,
+                new List<string> { "Breakout targets already spent on live mark" },
+                "Breakout setup spent", ct);
+            return;
+        }
+
+        NiftyOptionChainSnapshot chainSnap;
+        try
+        {
+            chainSnap = await _chain.GetSnapshotAsync(nifty.Id, spot > 0 ? spot : brk.EntryPrice, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Nifty option chain snapshot failed");
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceBreakoutChain, brk.Side, spot,
+                0, 0, 0, brk.EntryPrice, brk.InitialStopLoss, t1, brk.TargetT2, brk.TargetT3,
+                new List<string>
+                {
+                    $"Breakout {brk.Side} entry {brk.EntryPrice:0.00} · SL {brk.InitialStopLoss:0.00} · T1 {t1:0.00}",
+                    $"Option chain fetch failed: {ex.Message}",
+                },
+                "Option chain unavailable", ct);
+            return;
+        }
+
+        var gate = NiftyOptionChainAnalyzer.EvaluateBreakout(brk.Side, chainSnap.Metrics);
+        var reasons = new List<string>
+        {
+            "Breakout + Volume + option chain OI confirmation",
+            $"Breakout {brk.Side} entry {brk.EntryPrice:0.00} · SL {brk.InitialStopLoss:0.00} · T1 {t1:0.00}",
+        };
+        reasons.AddRange(gate.Reasons);
+        reasons.Add("Option ticket via Δ × Nifty levels (1 ITM primary + ATM alt)");
+        reasons.Add("Option buying only — flat by 14:30 IST");
+
+        if (!gate.Confirmed)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceBreakoutChain, brk.Side, spot,
+                0, 0, 0, brk.EntryPrice, brk.InitialStopLoss, t1, brk.TargetT2, brk.TargetT3,
+                reasons, gate.Summary, ct);
+            return;
+        }
+
+        await TryBuildAndPersistTicketAsync(
+            runId, userId, nifty.Id, SourceBreakoutChain, brk.Side, spot,
+            0, 0, 0,
+            brk.EntryPrice, brk.InitialStopLoss, t1, brk.TargetT2 ?? 0, brk.TargetT3 ?? 0,
+            reasons, confidence: 82, ct);
     }
 
     /// <summary>

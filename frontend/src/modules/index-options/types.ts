@@ -48,3 +48,27 @@ export type NiftyOrbRun = {
   status: string;
   asOfDate: string;
 };
+
+export type NiftyOptionChainStrike = {
+  strike: number;
+  callOi: number;
+  putOi: number;
+  callLtp: number | null;
+  putLtp: number | null;
+};
+
+export type NiftyOptionChainSnapshot = {
+  spot: number;
+  expiryLabel: string;
+  asOf: string;
+  usable: boolean;
+  pcr: number | null;
+  callWallStrike: number | null;
+  callWallOi: number;
+  putWallStrike: number | null;
+  putWallOi: number;
+  maxPainStrike: number | null;
+  totalCallOi: number;
+  totalPutOi: number;
+  ladder: NiftyOptionChainStrike[];
+};

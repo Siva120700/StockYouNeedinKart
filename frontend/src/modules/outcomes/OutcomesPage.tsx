@@ -46,6 +46,7 @@ const ALL_OUTCOME_STRATEGIES = [
   "nifty_orb_liq_v2",
   "nifty_liq_breakout",
   "nifty_breakout_volume",
+  "nifty_breakout_chain",
   "nifty_hero_zero",
 ] as const;
 

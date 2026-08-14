@@ -36,7 +36,16 @@ public sealed class Query
         [Service] IPortfolioRepository portfolio,
         [Service] Application.SectorScope.SectorScopeService sectorScope,
         CancellationToken ct)
-        => await sectorScope.RankAsync(await portfolio.GetSignalsAsync(user.UserId, runId, ct), ct);
+    {
+        try
+        {
+            return await sectorScope.RankAsync(await portfolio.GetSignalsAsync(user.UserId, runId, ct), ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
 
     public async Task<IReadOnlyList<LiquiditySignalRow>> LiquiditySignals(
         Guid? runId,
@@ -124,6 +133,28 @@ public sealed class Query
         [Service] Application.SectorScope.SectorScopeService sectorScope,
         CancellationToken ct)
         => await sectorScope.GetSnapshotAsync(ct);
+
+    public async Task<Application.IndexOptions.NiftyOptionChainSnapshot> NiftyOptionChain(
+        [Service] IInstrumentRepository instruments,
+        [Service] IMarketDataRepository market,
+        [Service] Application.IndexOptions.NiftyOptionChainService chain,
+        CancellationToken ct)
+    {
+        try
+        {
+            await instruments.SeedSectorIndexIfMissingAsync("NIFTY", "Nifty 50", ct);
+            var nifty = await instruments.FindBySymbolAsync("NIFTY", ct)
+                ?? throw new InvalidOperationException("NIFTY instrument not found.");
+            var ltp = (await market.GetAllLtpAsync(ct))
+                .FirstOrDefault(r => r.InstrumentId == nifty.Id);
+            var spot = ltp?.Ltp ?? 0m;
+            return await chain.GetSnapshotAsync(nifty.Id, spot, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
 
     public async Task<IReadOnlyList<NiftyOrbRecommendationRow>> NiftyOrbRecommendations(
         Guid? runId,
@@ -281,7 +312,7 @@ public sealed class Query
     {
         if (string.IsNullOrWhiteSpace(strategy)) return null;
         var s = strategy.Trim().ToLowerInvariant();
-        return s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout" or "options_intraday" or "nifty_orb" or "nifty_orb_liq_v2" or "nifty_liq_breakout" or "nifty_breakout_volume" or "nifty_hero_zero" ? s : null;
+        return s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout" or "options_intraday" or "nifty_orb" or "nifty_orb_liq_v2" or "nifty_liq_breakout" or "nifty_breakout_volume" or "nifty_hero_zero" or "nifty_breakout_chain" ? s : null;
     }
 
     private static string? NormalizeOutcomeResult(string? result)
@@ -310,14 +341,23 @@ public sealed class Mutation
         [Service] ICurrentUserAccessor user,
         [Service] AnalysisRunService analysis,
         CancellationToken ct)
-        => await analysis.RunAsync(
-            user.UserId,
-            includeNifty50,
-            includeNifty100,
-            includeWatchlist,
-            AnalysisTriggers.ManualRun,
-            includeSectorCheck,
-            ct);
+    {
+        try
+        {
+            return await analysis.RunAsync(
+                user.UserId,
+                includeNifty50,
+                includeNifty100,
+                includeWatchlist,
+                AnalysisTriggers.ManualRun,
+                includeSectorCheck,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
 
     public async Task<AnalysisRunRow> RunLiquidityAnalysis(
         bool includeNifty50,

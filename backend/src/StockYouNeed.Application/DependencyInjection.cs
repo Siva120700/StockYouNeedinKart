@@ -19,6 +19,7 @@ public static class DependencyInjection
         services.AddScoped<NfoSyncService>();
         services.AddScoped<OptionsIntradayService>();
         services.AddScoped<Application.IndexOptions.NiftyOrbService>();
+        services.AddScoped<Application.IndexOptions.NiftyOptionChainService>();
         services.AddScoped<Application.IndexOptions.IndexOptionNotificationService>();
         services.AddScoped<AnalysisRunService>();
         services.AddScoped<LiquidityAnalysisService>();
