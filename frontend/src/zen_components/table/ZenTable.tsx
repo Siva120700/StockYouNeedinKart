@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Box,
+  Checkbox,
   CircularProgress,
   IconButton,
   InputAdornment,
@@ -42,6 +43,10 @@ export type ZenTableProps<T> = {
   onSearchChange?: (value: string) => void;
   /** Notify parent of filtered/sorted rows (e.g. for aggregate stats). */
   onVisibleRowsChange?: (rows: T[]) => void;
+  /** Row checkboxes for multi-select (e.g. Traded tab delete). */
+  enableSelection?: boolean;
+  selectedRowIds?: string[];
+  onSelectedRowIdsChange?: (ids: string[]) => void;
 };
 
 type SortDir = "asc" | "desc";
@@ -91,14 +96,24 @@ export function ZenTable<T>({
   search: controlledSearch,
   onSearchChange,
   onVisibleRowsChange,
+  enableSelection = false,
+  selectedRowIds,
+  onSelectedRowIdsChange,
 }: ZenTableProps<T>) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(defaultPageSize);
   const [internalSearch, setInternalSearch] = useState("");
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [internalSelected, setInternalSelected] = useState<string[]>([]);
 
   const search = controlledSearch ?? internalSearch;
+  const selectedIds = selectedRowIds ?? internalSelected;
+
+  function setSelectedIds(ids: string[]) {
+    if (onSelectedRowIdsChange) onSelectedRowIdsChange(ids);
+    else setInternalSelected(ids);
+  }
 
   function setSearch(value: string) {
     if (onSearchChange) onSearchChange(value);
@@ -127,11 +142,42 @@ export function ZenTable<T>({
     onVisibleRowsChange?.(processedRows);
   }, [processedRows, onVisibleRowsChange]);
 
+  // Drop selections that no longer exist in the current row set.
+  useEffect(() => {
+    if (!enableSelection) return;
+    const valid = new Set(rows.map((r) => getRowId(r)));
+    const next = selectedIds.filter((id) => valid.has(id));
+    if (next.length !== selectedIds.length) setSelectedIds(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, enableSelection]);
+
   const pagedRows = useMemo(() => {
     if (!enablePagination) return processedRows;
     const start = page * pageSize;
     return processedRows.slice(start, start + pageSize);
   }, [processedRows, page, pageSize, enablePagination]);
+
+  const pageIds = pagedRows.map((r) => getRowId(r));
+  const allPageSelected =
+    enableSelection && pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
+  const somePageSelected =
+    enableSelection && pageIds.some((id) => selectedIds.includes(id)) && !allPageSelected;
+
+  function toggleAllPage() {
+    if (allPageSelected) {
+      setSelectedIds(selectedIds.filter((id) => !pageIds.includes(id)));
+    } else {
+      setSelectedIds([...new Set([...selectedIds, ...pageIds])]);
+    }
+  }
+
+  function toggleOne(id: string) {
+    if (selectedIds.includes(id)) {
+      setSelectedIds(selectedIds.filter((x) => x !== id));
+    } else {
+      setSelectedIds([...selectedIds, id]);
+    }
+  }
 
   function toggleSort(field: string, sortable?: boolean) {
     if (sortable === false) return;
@@ -146,6 +192,8 @@ export function ZenTable<T>({
     }
     setPage(0);
   }
+
+  const colSpan = columns.length + (enableSelection ? 1 : 0);
 
   if (loading) {
     return (
@@ -205,6 +253,17 @@ export function ZenTable<T>({
         <Table stickyHeader size={dense ? "small" : "medium"}>
           <TableHead>
             <TableRow>
+              {enableSelection ? (
+                <TableCell padding="checkbox" sx={{ bgcolor: "background.paper", width: 48 }}>
+                  <Checkbox
+                    size="small"
+                    indeterminate={somePageSelected}
+                    checked={allPageSelected}
+                    onChange={toggleAllPage}
+                    inputProps={{ "aria-label": "Select all on page" }}
+                  />
+                </TableCell>
+              ) : null}
               {columns.map((col) => {
                 const canSort = col.sortable !== false && col.type !== "action";
                 return (
@@ -239,37 +298,53 @@ export function ZenTable<T>({
           <TableBody>
             {pagedRows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={columns.length}>
+                <TableCell colSpan={colSpan}>
                   <Typography variant="body2" color="text.secondary" py={2}>
                     {emptyMessage}
                   </Typography>
                 </TableCell>
               </TableRow>
             ) : (
-              pagedRows.map((row) => (
-                <TableRow
-                  key={getRowId(row)}
-                  hover
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  sx={{ cursor: onRowClick ? "pointer" : "default" }}
-                >
-                  {columns.map((col) => {
-                    const value = col.getValue(row);
-                    const content = col.displayRenderer
-                      ? col.displayRenderer(value, row)
-                      : String(value ?? "");
-                    return (
-                      <TableCell
-                        key={col.field}
-                        align={col.cellAlignment ?? "left"}
-                        sx={{ width: col.width, minWidth: col.width }}
-                      >
-                        {content}
+              pagedRows.map((row) => {
+                const id = getRowId(row);
+                const checked = selectedIds.includes(id);
+                return (
+                  <TableRow
+                    key={id}
+                    hover
+                    selected={checked}
+                    onClick={onRowClick ? () => onRowClick(row) : undefined}
+                    sx={{ cursor: onRowClick ? "pointer" : "default" }}
+                  >
+                    {enableSelection ? (
+                      <TableCell padding="checkbox">
+                        <Checkbox
+                          size="small"
+                          checked={checked}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => toggleOne(id)}
+                          inputProps={{ "aria-label": `Select row ${id}` }}
+                        />
                       </TableCell>
-                    );
-                  })}
-                </TableRow>
-              ))
+                    ) : null}
+                    {columns.map((col) => {
+                      const value = col.getValue(row);
+                      const content = col.displayRenderer
+                        ? col.displayRenderer(value, row)
+                        : String(value ?? "");
+                      return (
+                        <TableCell
+                          key={col.field}
+                          align={col.cellAlignment ?? "left"}
+                          sx={{ width: col.width, minWidth: col.width }}
+                        >
+                          {content}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>

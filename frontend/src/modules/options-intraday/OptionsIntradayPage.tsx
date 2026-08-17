@@ -9,11 +9,14 @@ import {
   Stack,
   Switch,
   FormControlLabel,
+  Tab,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
-import { CaretDown, CaretUp, Play } from "@phosphor-icons/react";
+import { CaretDown, CaretUp, Handshake, Play } from "@phosphor-icons/react";
 import { columnFactories } from "../../zen_components/table/columnFactories";
+import type { ColumnConfig } from "../../zen_components/table/columnTypes";
 import ZenTable from "../../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
@@ -25,6 +28,19 @@ import {
   type HitRateByInstrument,
 } from "../../utils/historicalHitRate";
 import { createSectorRsColumn } from "../../utils/sectorRelativeStrength.tsx";
+import { addLocalDayPosition, closeLocalDayPositionsByIds } from "../../utils/localDayPositions";
+import {
+  formatIstTime,
+  isSignalDayTraded,
+  markSignalDayTraded,
+  syncSignalDayHistory,
+  unmarkSignalDayTraded,
+  type SignalDayEntry,
+  type SignalsTab,
+} from "../../utils/signalDayHistory";
+import TradedDeleteBar from "../../zen_components/shared/TradedDeleteBar";
+
+const HISTORY_SCOPE = "options_intraday";
 
 function fmt(n: number | null | undefined, d = 2): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
@@ -41,10 +57,19 @@ export default function OptionsIntradayPage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [rows, setRows] = useState<OptionsIntradayRecommendation[]>([]);
+  const [historyRows, setHistoryRows] = useState<
+    SignalDayEntry<OptionsIntradayRecommendation>[]
+  >([]);
+  const [tradedRows, setTradedRows] = useState<
+    SignalDayEntry<OptionsIntradayRecommendation>[]
+  >([]);
+  const [tab, setTab] = useState<SignalsTab>("active");
+  const [selectedTradedIds, setSelectedTradedIds] = useState<string[]>([]);
   const [hitRates, setHitRates] = useState<HitRateByInstrument>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "recommended" | "skipped">("all");
   const [hideLaggingRs, setHideLaggingRs] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -59,6 +84,9 @@ export default function OptionsIntradayPage() {
       ]);
       setRows(recs);
       setHitRates(rates);
+      const synced = syncSignalDayHistory(HISTORY_SCOPE, recs);
+      setHistoryRows(synced.history);
+      setTradedRows(synced.traded);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -80,11 +108,61 @@ export default function OptionsIntradayPage() {
     }
   }
 
-  const visible = useMemo(() => {
+  function onTrade(row: OptionsIntradayRecommendation) {
+    setError(null);
+    setInfo(null);
+    const premium = Number(row.premiumLtp);
+    const entry = Number.isFinite(premium) && premium > 0 ? premium : Number(row.underlyingEntry);
+    const sl =
+      row.premiumLtp != null && Number.isFinite(Number(row.premiumLtp))
+        ? Number(row.premiumLtp) * 0.5
+        : Number(row.underlyingStopLoss);
+    markSignalDayTraded(HISTORY_SCOPE, row);
+    addLocalDayPosition({
+      id: `opt-intra-${row.id}`,
+      scope: HISTORY_SCOPE,
+      symbol: row.contractTradingSymbol ?? row.appSymbol,
+      instrumentName: `${row.appSymbol} ${row.side.toUpperCase()} · stock options`,
+      side: "buy",
+      quantityLots: row.contractLotSize && row.contractLotSize > 0 ? 1 : 1,
+      entryPrice: entry,
+      currentStopLoss: Number.isFinite(sl) ? sl : entry * 0.5,
+      lastPrice: entry,
+      notes: `Stock SL ${fmt(row.underlyingStopLoss)} · T1 ${fmt(row.underlyingTargetT1)} · flat ${row.flatByIst}`,
+    });
+    setInfo(`${row.appSymbol} moved to Positions (Traded).`);
+    const synced = syncSignalDayHistory(HISTORY_SCOPE, rows);
+    setHistoryRows(synced.history);
+    setTradedRows(synced.traded);
+  }
+
+  function tradedRowId(r: OptionsIntradayRecommendation) {
+    return `${r.instrumentId}:${r.side}:${r.id}`;
+  }
+
+  function onDeleteSelectedTraded() {
+    const selected = tradedRows.filter((r) => selectedTradedIds.includes(tradedRowId(r)));
+    if (selected.length === 0) return;
+    unmarkSignalDayTraded(HISTORY_SCOPE, selected);
+    closeLocalDayPositionsByIds(selected.map((r) => `opt-intra-${r.id}`));
+    setSelectedTradedIds([]);
+    const synced = syncSignalDayHistory(HISTORY_SCOPE, rows);
+    setHistoryRows(synced.history);
+    setTradedRows(synced.traded);
+    setInfo(`Removed ${selected.length} from Traded.`);
+  }
+
+  const filteredActive = useMemo(() => {
     let list = statusFilter === "all" ? rows : rows.filter((r) => r.status === statusFilter);
     if (hideLaggingRs) list = list.filter((r) => !r.sectorRs?.downranked);
     return list;
   }, [rows, statusFilter, hideLaggingRs]);
+
+  const tableRows = useMemo(() => {
+    if (tab === "history") return historyRows;
+    if (tab === "traded") return tradedRows;
+    return filteredActive;
+  }, [tab, filteredActive, historyRows, tradedRows]);
 
   useEffect(() => {
     setTitle("Options Intraday");
@@ -97,28 +175,32 @@ export default function OptionsIntradayPage() {
   useEffect(() => {
     setPageActions(
       <Stack direction="row" spacing={1} alignItems="center">
-        <TextField
-          select
-          size="small"
-          label="Status"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-          sx={{ minWidth: 140 }}
-        >
-          <MenuItem value="all">All</MenuItem>
-          <MenuItem value="recommended">Recommended</MenuItem>
-          <MenuItem value="skipped">Skipped</MenuItem>
-        </TextField>
-        <FormControlLabel
-          control={
-            <Switch
+        {tab === "active" ? (
+          <>
+            <TextField
+              select
               size="small"
-              checked={hideLaggingRs}
-              onChange={(e) => setHideLaggingRs(e.target.checked)}
+              label="Status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+              sx={{ minWidth: 140 }}
+            >
+              <MenuItem value="all">All</MenuItem>
+              <MenuItem value="recommended">Recommended</MenuItem>
+              <MenuItem value="skipped">Skipped</MenuItem>
+            </TextField>
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={hideLaggingRs}
+                  onChange={(e) => setHideLaggingRs(e.target.checked)}
+                />
+              }
+              label="Hide lagging RS"
             />
-          }
-          label="Hide lagging RS"
-        />
+          </>
+        ) : null}
         <Button
           size="small"
           variant="contained"
@@ -131,10 +213,10 @@ export default function OptionsIntradayPage() {
       </Stack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, hideLaggingRs, running]);
+  }, [statusFilter, hideLaggingRs, running, tab]);
 
-  const columns = useMemo(
-    () => [
+  const columns = useMemo(() => {
+    const cols: ColumnConfig<OptionsIntradayRecommendation>[] = [
       columnFactories.createTextColumn<OptionsIntradayRecommendation>({
         field: "appSymbol",
         headerName: "Stock",
@@ -198,7 +280,8 @@ export default function OptionsIntradayPage() {
         field: "impliedVolatility",
         headerName: "IV",
         width: 70,
-        getValue: (r) => (r.impliedVolatility != null ? `${fmt(r.impliedVolatility, 1)}%` : "—"),
+        getValue: (r) =>
+          r.impliedVolatility != null ? `${fmt(r.impliedVolatility, 1)}%` : "—",
       }),
       columnFactories.createTextColumn<OptionsIntradayRecommendation>({
         field: "futuresBuildUp",
@@ -218,27 +301,103 @@ export default function OptionsIntradayPage() {
         width: 110,
         getValue: (r) => r.status,
       }),
-    ],
-    [hitRates],
-  );
+    ];
 
-  const expanded = rows.find((r) => r.id === expandedId) ?? null;
+    if (tab === "history") {
+      cols.push(
+        columnFactories.createTextColumn<OptionsIntradayRecommendation>({
+          field: "disappearedAt",
+          headerName: "Left",
+          width: 90,
+          getValue: (r) =>
+            formatIstTime(
+              (r as SignalDayEntry<OptionsIntradayRecommendation>).disappearedAt,
+            ),
+        }),
+      );
+    }
+    if (tab === "traded") {
+      cols.push(
+        columnFactories.createTextColumn<OptionsIntradayRecommendation>({
+          field: "tradedAt",
+          headerName: "Traded",
+          width: 90,
+          getValue: (r) =>
+            formatIstTime((r as SignalDayEntry<OptionsIntradayRecommendation>).tradedAt),
+        }),
+      );
+    }
+    if (tab !== "traded") {
+      cols.push(
+        columnFactories.createActionColumn<OptionsIntradayRecommendation>(
+          (row) => [
+            {
+              icon: <Handshake size={DEFAULT_SMALL_ICON_SIZE} />,
+              tooltip: isSignalDayTraded(HISTORY_SCOPE, row)
+                ? "Already traded"
+                : "Trade — open in Positions",
+              disabled: () => isSignalDayTraded(HISTORY_SCOPE, row),
+              onClick: (r) => onTrade(r),
+            },
+          ],
+          { field: "actions", headerName: "Trade", width: 80 },
+        ),
+      );
+    }
+    return cols;
+  }, [hitRates, tab]);
+
+  const expanded = tableRows.find((r) => r.id === expandedId) ?? null;
+
+  const emptyMessage =
+    tab === "history"
+      ? "No options setups have left today. History keeps frozen premium/levels from first sighting."
+      : tab === "traded"
+        ? "No traded options today. Use Trade on Active or History."
+        : "No recommendations. Click Run.";
 
   return (
     <Stack spacing={2} p={2}>
       {error && <Alert severity="error">{error}</Alert>}
+      {info ? (
+        <Alert severity="success" onClose={() => setInfo(null)}>
+          {info}
+        </Alert>
+      ) : null}
       <Alert severity="info">
         Direction, entry, SL and T1 come only from the underlying stock. Recommendations require
         confidence ≥75 (Confluence or supportive futures OI), ATM/1ITM Δ 0.45–0.60, volume ≥100,
         and bid/ask spread ≤5%. Exit when spot hits Stock SL or T1. No new entries at/after 15:20
         IST; all positions must be flat by 15:20.
       </Alert>
+      <Tabs
+        value={tab}
+        onChange={(_, v: SignalsTab) => {
+          setTab(v);
+          setSelectedTradedIds([]);
+        }}
+        sx={{ minHeight: 40 }}
+      >
+        <Tab value="active" label={`Active (${filteredActive.length})`} />
+        <Tab value="history" label={`History (${historyRows.length})`} />
+        <Tab value="traded" label={`Traded (${tradedRows.length})`} />
+      </Tabs>
+      {tab === "traded" ? (
+        <TradedDeleteBar
+          selectedCount={selectedTradedIds.length}
+          onDelete={onDeleteSelectedTraded}
+        />
+      ) : null}
       <ZenTable
-        rows={visible}
+        rows={tableRows}
         columns={columns}
         loading={loading}
-        getRowId={(r) => r.id}
+        getRowId={(r) => (tab === "active" ? r.id : tradedRowId(r))}
         onRowClick={(r) => setExpandedId((id) => (id === r.id ? null : r.id))}
+        emptyMessage={emptyMessage}
+        enableSelection={tab === "traded"}
+        selectedRowIds={tab === "traded" ? selectedTradedIds : undefined}
+        onSelectedRowIdsChange={tab === "traded" ? setSelectedTradedIds : undefined}
       />
       <Collapse in={!!expanded}>
         {expanded && (
@@ -282,7 +441,7 @@ export default function OptionsIntradayPage() {
                   } ${fmt(expanded.underlyingStopLoss)} (SL) or spot ${
                     expanded.side === "buy" ? "≥" : "≤"
                   } ${fmt(expanded.underlyingTargetT1)} (T1) | Flat by ${expanded.flatByIst}`
-                : expanded.skipReason ?? "Skipped"}
+                : (expanded.skipReason ?? "Skipped")}
             </Typography>
             <Stack direction={{ xs: "column", md: "row" }} spacing={4}>
               <Box flex={1}>

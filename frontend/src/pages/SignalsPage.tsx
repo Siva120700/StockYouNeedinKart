@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, FormControlLabel, Switch, Stack as MuiStack } from "@mui/material";
-import { Play, ArrowSquareOut, FilePdf, FileXls } from "@phosphor-icons/react";
+import {
+  Alert,
+  Button,
+  FormControlLabel,
+  Switch,
+  Stack as MuiStack,
+  Tab,
+  Tabs,
+} from "@mui/material";
+import { Play, Handshake, FilePdf, FileXls } from "@phosphor-icons/react";
 import { ActionFactory, DataFactory } from "../api/factories";
 import type { Signal } from "../api/types";
 import { columnFactories } from "../zen_components/table/columnFactories";
+import type { ColumnConfig } from "../zen_components/table/columnTypes";
 import ZenTable from "../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../constants";
@@ -20,6 +29,17 @@ import {
   type HitRateByInstrument,
 } from "../utils/historicalHitRate";
 import { createSectorRsColumn } from "../utils/sectorRelativeStrength.tsx";
+import {
+  isSignalDayTraded,
+  markSignalDayTraded,
+  syncSignalDayHistory,
+  unmarkSignalDayTraded,
+  type SignalDayEntry,
+  type SignalsTab,
+} from "../utils/signalDayHistory";
+import TradedDeleteBar from "../zen_components/shared/TradedDeleteBar";
+
+const HISTORY_SCOPE = "signals";
 
 function formatTarget(row: Signal, target: number | null | undefined) {
   if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice) return "";
@@ -47,10 +67,27 @@ function formatSl(row: Signal) {
   })} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`;
 }
 
+function formatTime(iso: string | null | undefined) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleTimeString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "";
+  }
+}
+
 export default function SignalsPage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [rows, setRows] = useState<Signal[]>([]);
+  const [historyRows, setHistoryRows] = useState<SignalDayEntry<Signal>[]>([]);
+  const [tradedRows, setTradedRows] = useState<SignalDayEntry<Signal>[]>([]);
+  const [tab, setTab] = useState<SignalsTab>("active");
+  const [selectedTradedIds, setSelectedTradedIds] = useState<string[]>([]);
   const [hitRates, setHitRates] = useState<HitRateByInstrument>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -59,6 +96,7 @@ export default function SignalsPage() {
   const [freshCrossCheck, setFreshCrossCheck] = useState(false);
   const [hideLaggingRs, setHideLaggingRs] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   const signalExportColumns: ExportColumn<Signal>[] = useMemo(
     () => [
@@ -88,6 +126,9 @@ export default function SignalsPage() {
       ]);
       setRows(signals);
       setHitRates(rates);
+      const synced = syncSignalDayHistory(HISTORY_SCOPE, signals);
+      setHistoryRows(synced.history);
+      setTradedRows(synced.traded);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -109,13 +150,32 @@ export default function SignalsPage() {
     }
   }
 
-  async function onOpen(signalId: string) {
+  async function onTrade(row: Signal) {
+    setError(null);
+    setInfo(null);
     try {
-      await ActionFactory.openPositionFromSignal(signalId);
+      await ActionFactory.openPositionFromSignal(row.id);
+      markSignalDayTraded(HISTORY_SCOPE, row);
+      setInfo(`${row.appSymbol} moved to Positions (Traded).`);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
+  }
+
+  function tradedRowId(r: Signal) {
+    return `${r.instrumentId}:${r.side}:${r.id}`;
+  }
+
+  function onDeleteSelectedTraded() {
+    const selected = tradedRows.filter((r) => selectedTradedIds.includes(tradedRowId(r)));
+    if (selected.length === 0) return;
+    unmarkSignalDayTraded(HISTORY_SCOPE, selected);
+    setSelectedTradedIds([]);
+    const synced = syncSignalDayHistory(HISTORY_SCOPE, rows);
+    setHistoryRows(synced.history);
+    setTradedRows(synced.traded);
+    setInfo(`Removed ${selected.length} from Traded.`);
   }
 
   /** Risk-reward vs T1: reward/risk. Buy (T1-entry)/(entry-SL); sell (entry-T1)/(SL-entry). */
@@ -131,7 +191,7 @@ export default function SignalsPage() {
   }
 
   // Toggles filter already-loaded rows — no backend call.
-  const visibleRows = useMemo(() => {
+  const filteredActive = useMemo(() => {
     let list = rows;
     if (sectorCheck) list = list.filter((r) => r.sectorConfirmed);
     if (freshCrossCheck) list = list.filter((r) => r.freshCross);
@@ -144,6 +204,12 @@ export default function SignalsPage() {
     }
     return list;
   }, [rows, sectorCheck, riskRewardCheck, freshCrossCheck, hideLaggingRs]);
+
+  const tableRows: Signal[] = useMemo(() => {
+    if (tab === "history") return historyRows;
+    if (tab === "traded") return tradedRows;
+    return filteredActive;
+  }, [tab, filteredActive, historyRows, tradedRows]);
 
   useEffect(() => {
     setTitle("Signals");
@@ -158,7 +224,7 @@ export default function SignalsPage() {
       title: "Breakout Signals",
       fileName: exportStamp("signals", "pdf"),
       columns: signalExportColumns,
-      rows: visibleRows,
+      rows: tableRows,
     });
   }
 
@@ -167,58 +233,62 @@ export default function SignalsPage() {
       sheetName: "Signals",
       fileName: exportStamp("signals", "xlsx"),
       columns: signalExportColumns,
-      rows: visibleRows,
+      rows: tableRows,
     });
   }
 
   useEffect(() => {
-    const exportDisabled = loading || visibleRows.length === 0;
+    const exportDisabled = loading || tableRows.length === 0;
     setPageActions(
       <MuiStack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={sectorCheck}
-              onChange={(e) => setSectorCheck(e.target.checked)}
+        {tab === "active" ? (
+          <>
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={sectorCheck}
+                  onChange={(e) => setSectorCheck(e.target.checked)}
+                />
+              }
+              label="Sector check"
+              sx={{ mr: 1 }}
             />
-          }
-          label="Sector check"
-          sx={{ mr: 1 }}
-        />
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={freshCrossCheck}
-              onChange={(e) => setFreshCrossCheck(e.target.checked)}
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={freshCrossCheck}
+                  onChange={(e) => setFreshCrossCheck(e.target.checked)}
+                />
+              }
+              label="Fresh cross"
+              sx={{ mr: 1 }}
             />
-          }
-          label="Fresh cross"
-          sx={{ mr: 1 }}
-        />
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={hideLaggingRs}
-              onChange={(e) => setHideLaggingRs(e.target.checked)}
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={hideLaggingRs}
+                  onChange={(e) => setHideLaggingRs(e.target.checked)}
+                />
+              }
+              label="Hide lagging RS"
+              sx={{ mr: 1 }}
             />
-          }
-          label="Hide lagging RS"
-          sx={{ mr: 1 }}
-        />
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={riskRewardCheck}
-              onChange={(e) => setRiskRewardCheck(e.target.checked)}
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={riskRewardCheck}
+                  onChange={(e) => setRiskRewardCheck(e.target.checked)}
+                />
+              }
+              label="R:R ≥ 1"
+              sx={{ mr: 1 }}
             />
-          }
-          label="R:R ≥ 1"
-          sx={{ mr: 1 }}
-        />
+          </>
+        ) : null}
         <Button
           variant="outlined"
           size="small"
@@ -249,10 +319,19 @@ export default function SignalsPage() {
       </MuiStack>,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, loading, sectorCheck, riskRewardCheck, freshCrossCheck, hideLaggingRs, visibleRows]);
+  }, [
+    running,
+    loading,
+    sectorCheck,
+    riskRewardCheck,
+    freshCrossCheck,
+    hideLaggingRs,
+    tableRows,
+    tab,
+  ]);
 
   const columns = useMemo(() => {
-    return [
+    const base: ColumnConfig<Signal>[] = [
       columnFactories.createTextColumn<Signal>({
         field: "appSymbol",
         headerName: "Symbol",
@@ -310,18 +389,60 @@ export default function SignalsPage() {
         width: 90,
         getValue: (r) => r.volumeOk,
       }),
-      columnFactories.createActionColumn<Signal>(
-        () => [
-          {
-            icon: <ArrowSquareOut size={DEFAULT_SMALL_ICON_SIZE} />,
-            tooltip: "Open position",
-            onClick: (r) => void onOpen(r.id),
-          },
-        ],
-        { field: "actions", headerName: "", width: 72 },
-      ),
     ];
-  }, [hitRates]);
+
+    if (tab === "history") {
+      base.push(
+        columnFactories.createTextColumn<Signal>({
+          field: "disappearedAt",
+          headerName: "Left",
+          width: 90,
+          getValue: (r) =>
+            formatTime((r as SignalDayEntry<Signal>).disappearedAt),
+        }),
+      );
+    }
+
+    if (tab === "traded") {
+      base.push(
+        columnFactories.createTextColumn<Signal>({
+          field: "tradedAt",
+          headerName: "Traded",
+          width: 90,
+          getValue: (r) => formatTime((r as SignalDayEntry<Signal>).tradedAt),
+        }),
+      );
+    }
+
+    if (tab !== "traded") {
+      base.push(
+        columnFactories.createActionColumn<Signal>(
+          (row) => [
+            {
+              icon: <Handshake size={DEFAULT_SMALL_ICON_SIZE} />,
+              tooltip: isSignalDayTraded(HISTORY_SCOPE, row)
+                ? "Already traded"
+                : "Trade — open in Positions",
+              disabled: () => isSignalDayTraded(HISTORY_SCOPE, row),
+              onClick: (r) => void onTrade(r),
+            },
+          ],
+          { field: "actions", headerName: "Trade", width: 80 },
+        ),
+      );
+    }
+
+    return base;
+  }, [hitRates, tab]);
+
+  const emptyMessage =
+    tab === "history"
+      ? "No signals have left the list today. History keeps the frozen entry/SL/targets from when each name first appeared."
+      : tab === "traded"
+        ? "No traded signals today. Use Trade on Active or History to open a position."
+        : sectorCheck || riskRewardCheck || freshCrossCheck
+          ? "No signals match the active filters. Turn filters off, or Run analysis again."
+          : "No actionable signals (approaching entry, open T1). Click Run analysis.";
 
   return (
     <>
@@ -330,18 +451,40 @@ export default function SignalsPage() {
           {error}
         </Alert>
       ) : null}
+      {info ? (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo(null)}>
+          {info}
+        </Alert>
+      ) : null}
+      <Tabs
+        value={tab}
+        onChange={(_, v: SignalsTab) => {
+          setTab(v);
+          setSelectedTradedIds([]);
+        }}
+        sx={{ mb: 1.5, minHeight: 40 }}
+      >
+        <Tab value="active" label={`Active (${filteredActive.length})`} />
+        <Tab value="history" label={`History (${historyRows.length})`} />
+        <Tab value="traded" label={`Traded (${tradedRows.length})`} />
+      </Tabs>
+      {tab === "traded" ? (
+        <TradedDeleteBar
+          selectedCount={selectedTradedIds.length}
+          onDelete={onDeleteSelectedTraded}
+        />
+      ) : null}
       <ZenTable
         columns={columns}
-        rows={visibleRows}
-        getRowId={(r) => r.id}
+        rows={tableRows}
+        getRowId={(r) => (tab === "active" ? r.id : tradedRowId(r))}
         loading={loading}
         enableSearch
         searchPlaceholder="Search symbol or name…"
-        emptyMessage={
-          sectorCheck || riskRewardCheck || freshCrossCheck
-            ? "No signals match the active filters. Turn filters off, or Run analysis again."
-            : "No actionable signals (approaching entry, open T1). Click Run analysis."
-        }
+        emptyMessage={emptyMessage}
+        enableSelection={tab === "traded"}
+        selectedRowIds={tab === "traded" ? selectedTradedIds : undefined}
+        onSelectedRowIdsChange={tab === "traded" ? setSelectedTradedIds : undefined}
       />
     </>
   );

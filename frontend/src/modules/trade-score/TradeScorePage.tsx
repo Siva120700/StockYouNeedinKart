@@ -8,10 +8,13 @@ import {
   LinearProgress,
   Stack,
   Switch,
+  Tab,
+  Tabs,
   Typography,
 } from "@mui/material";
-import { ArrowSquareOut, Play } from "@phosphor-icons/react";
+import { Handshake, Play } from "@phosphor-icons/react";
 import { columnFactories } from "../../zen_components/table/columnFactories";
+import type { ColumnConfig } from "../../zen_components/table/columnTypes";
 import ZenTable from "../../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
@@ -24,6 +27,18 @@ import {
   type HitRateByInstrument,
 } from "../../utils/historicalHitRate";
 import { createSectorRsColumn } from "../../utils/sectorRelativeStrength.tsx";
+import {
+  formatIstTime,
+  isSignalDayTraded,
+  markSignalDayTraded,
+  syncSignalDayHistory,
+  unmarkSignalDayTraded,
+  type SignalDayEntry,
+  type SignalsTab,
+} from "../../utils/signalDayHistory";
+import TradedDeleteBar from "../../zen_components/shared/TradedDeleteBar";
+
+const HISTORY_SCOPE = "trade_score";
 
 function riskReward(row: TradeConfidenceScore): number | null {
   const entry = Number(row.entryPrice);
@@ -66,12 +81,17 @@ export default function TradeScorePage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
   const [rows, setRows] = useState<TradeConfidenceScore[]>([]);
+  const [historyRows, setHistoryRows] = useState<SignalDayEntry<TradeConfidenceScore>[]>([]);
+  const [tradedRows, setTradedRows] = useState<SignalDayEntry<TradeConfidenceScore>[]>([]);
+  const [tab, setTab] = useState<SignalsTab>("active");
+  const [selectedTradedIds, setSelectedTradedIds] = useState<string[]>([]);
   const [hitRates, setHitRates] = useState<HitRateByInstrument>(() => new Map());
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [minScore, setMinScore] = useState(60);
   const [hideLaggingRs, setHideLaggingRs] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   async function refresh() {
     setError(null);
@@ -83,6 +103,9 @@ export default function TradeScorePage() {
       ]);
       setRows(scores);
       setHitRates(rates);
+      const synced = syncSignalDayHistory(HISTORY_SCOPE, scores);
+      setHistoryRows(synced.history);
+      setTradedRows(synced.traded);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -104,11 +127,45 @@ export default function TradeScorePage() {
     }
   }
 
-  const visibleRows = useMemo(() => {
+  async function onTrade(row: TradeConfidenceScore) {
+    setError(null);
+    setInfo(null);
+    try {
+      await TradeScoreApi.openPosition(row.id);
+      markSignalDayTraded(HISTORY_SCOPE, row);
+      setInfo(`${row.appSymbol} moved to Positions (Traded).`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  function tradedRowId(r: TradeConfidenceScore) {
+    return `${r.instrumentId}:${r.side}:${r.id}`;
+  }
+
+  function onDeleteSelectedTraded() {
+    const selected = tradedRows.filter((r) => selectedTradedIds.includes(tradedRowId(r)));
+    if (selected.length === 0) return;
+    unmarkSignalDayTraded(HISTORY_SCOPE, selected);
+    setSelectedTradedIds([]);
+    const synced = syncSignalDayHistory(HISTORY_SCOPE, rows);
+    setHistoryRows(synced.history);
+    setTradedRows(synced.traded);
+    setInfo(`Removed ${selected.length} from Traded.`);
+  }
+
+  const filteredActive = useMemo(() => {
     let list = rows.filter((r) => r.confidenceScore >= minScore);
     if (hideLaggingRs) list = list.filter((r) => !r.sectorRs?.downranked);
     return list;
   }, [rows, minScore, hideLaggingRs]);
+
+  const tableRows = useMemo(() => {
+    if (tab === "history") return historyRows;
+    if (tab === "traded") return tradedRows;
+    return filteredActive;
+  }, [tab, filteredActive, historyRows, tradedRows]);
 
   useEffect(() => {
     setTitle("Trade Score");
@@ -121,26 +178,30 @@ export default function TradeScorePage() {
   useEffect(() => {
     setPageActions(
       <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={minScore >= 75}
-              onChange={(e) => setMinScore(e.target.checked ? 75 : 60)}
+        {tab === "active" ? (
+          <>
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={minScore >= 75}
+                  onChange={(e) => setMinScore(e.target.checked ? 75 : 60)}
+                />
+              }
+              label="Min ★★★★ (75+)"
             />
-          }
-          label="Min ★★★★ (75+)"
-        />
-        <FormControlLabel
-          control={
-            <Switch
-              size="small"
-              checked={hideLaggingRs}
-              onChange={(e) => setHideLaggingRs(e.target.checked)}
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={hideLaggingRs}
+                  onChange={(e) => setHideLaggingRs(e.target.checked)}
+                />
+              }
+              label="Hide lagging RS"
             />
-          }
-          label="Hide lagging RS"
-        />
+          </>
+        ) : null}
         <Button
           variant="contained"
           size="small"
@@ -152,10 +213,10 @@ export default function TradeScorePage() {
         </Button>
       </Stack>,
     );
-  }, [running, minScore, hideLaggingRs, setPageActions]);
+  }, [running, minScore, hideLaggingRs, tab, setPageActions]);
 
-  const columns = useMemo(
-    () => [
+  const columns = useMemo(() => {
+    const cols: ColumnConfig<TradeConfidenceScore>[] = [
       columnFactories.createNumberColumn<TradeConfidenceScore>({
         field: "confidenceScore",
         headerName: "Score",
@@ -231,25 +292,67 @@ export default function TradeScorePage() {
         getValue: (r) =>
           `S${r.signalsScore} L${r.liquidityScore} B${r.breakoutScore} F${r.futuresScore} O${r.optionsScore}`,
       }),
-      columnFactories.createActionColumn<TradeConfidenceScore>(
-        () => [
-          {
-            icon: <ArrowSquareOut size={DEFAULT_SMALL_ICON_SIZE} />,
-            tooltip: "Open position",
-            onClick: (r) => void TradeScoreApi.openPosition(r.id),
-          },
-        ],
-        { field: "actions", headerName: "", width: 72 },
-      ),
-    ],
-    [hitRates],
-  );
+    ];
+
+    if (tab === "history") {
+      cols.push(
+        columnFactories.createTextColumn<TradeConfidenceScore>({
+          field: "disappearedAt",
+          headerName: "Left",
+          width: 90,
+          getValue: (r) =>
+            formatIstTime((r as SignalDayEntry<TradeConfidenceScore>).disappearedAt),
+        }),
+      );
+    }
+    if (tab === "traded") {
+      cols.push(
+        columnFactories.createTextColumn<TradeConfidenceScore>({
+          field: "tradedAt",
+          headerName: "Traded",
+          width: 90,
+          getValue: (r) =>
+            formatIstTime((r as SignalDayEntry<TradeConfidenceScore>).tradedAt),
+        }),
+      );
+    }
+    if (tab !== "traded") {
+      cols.push(
+        columnFactories.createActionColumn<TradeConfidenceScore>(
+          (row) => [
+            {
+              icon: <Handshake size={DEFAULT_SMALL_ICON_SIZE} />,
+              tooltip: isSignalDayTraded(HISTORY_SCOPE, row)
+                ? "Already traded"
+                : "Trade — open in Positions",
+              disabled: () => isSignalDayTraded(HISTORY_SCOPE, row),
+              onClick: (r) => void onTrade(r),
+            },
+          ],
+          { field: "actions", headerName: "Trade", width: 80 },
+        ),
+      );
+    }
+    return cols;
+  }, [hitRates, tab]);
+
+  const emptyMessage =
+    tab === "history"
+      ? "No scores have left the list today. History keeps the frozen levels from first sighting."
+      : tab === "traded"
+        ? "No traded scores today. Use Trade on Active or History."
+        : "No trade scores yet. Run trade score (refreshes Signals + Liquidity Fresh, then scores).";
 
   return (
     <>
       {error ? (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
+        </Alert>
+      ) : null}
+      {info ? (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo(null)}>
+          {info}
         </Alert>
       ) : null}
       <Alert severity="info" sx={{ mb: 2 }}>
@@ -259,13 +362,13 @@ export default function TradeScorePage() {
         Existing Signals / Liquidity pages are unchanged.
       </Alert>
       {running ? <LinearProgress sx={{ mb: 2 }} /> : null}
-      {visibleRows.length > 0 ? (
+      {tab === "active" && filteredActive.length > 0 ? (
         <Box sx={{ mb: 2 }}>
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
             Top pick
           </Typography>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            {visibleRows.slice(0, 3).map((r) => (
+            {filteredActive.slice(0, 3).map((r) => (
               <Chip
                 key={r.id}
                 label={`${r.appSymbol} ${r.side.toUpperCase()} · ${r.confidenceScore}% · ${ratingLabel(r.rating)}`}
@@ -274,21 +377,42 @@ export default function TradeScorePage() {
               />
             ))}
           </Stack>
-          {visibleRows[0]?.reasons?.length ? (
+          {filteredActive[0]?.reasons?.length ? (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              {visibleRows[0].reasons.map((x) => `✓ ${x}`).join(" · ")}
+              {filteredActive[0].reasons.map((x) => `✓ ${x}`).join(" · ")}
             </Typography>
           ) : null}
         </Box>
       ) : null}
+      <Tabs
+        value={tab}
+        onChange={(_, v: SignalsTab) => {
+          setTab(v);
+          setSelectedTradedIds([]);
+        }}
+        sx={{ mb: 1.5, minHeight: 40 }}
+      >
+        <Tab value="active" label={`Active (${filteredActive.length})`} />
+        <Tab value="history" label={`History (${historyRows.length})`} />
+        <Tab value="traded" label={`Traded (${tradedRows.length})`} />
+      </Tabs>
+      {tab === "traded" ? (
+        <TradedDeleteBar
+          selectedCount={selectedTradedIds.length}
+          onDelete={onDeleteSelectedTraded}
+        />
+      ) : null}
       <ZenTable
         columns={columns}
-        rows={visibleRows}
-        getRowId={(r) => r.id}
+        rows={tableRows}
+        getRowId={(r) => (tab === "active" ? r.id : tradedRowId(r))}
         loading={loading}
         enableSearch
         searchPlaceholder="Search symbol…"
-        emptyMessage="No trade scores yet. Run trade score (refreshes Signals + Liquidity Fresh, then scores)."
+        emptyMessage={emptyMessage}
+        enableSelection={tab === "traded"}
+        selectedRowIds={tab === "traded" ? selectedTradedIds : undefined}
+        onSelectedRowIdsChange={tab === "traded" ? setSelectedTradedIds : undefined}
       />
     </>
   );
