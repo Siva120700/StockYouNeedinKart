@@ -54,6 +54,16 @@ export const AnalyzeStockApi = {
             reasons entryPrice initialStopLoss
             targetT1 targetT2 targetT3 breakoutConfirmed
           }
+          momentumV2 {
+            side asOfDate entryPrice initialStopLoss
+            targetT1 targetT2 targetT3
+            volumeOk sectorConfirmed freshCross momentumScore
+          }
+          momentumV3 {
+            side asOfDate entryPrice initialStopLoss
+            targetT1 targetT2 targetT3
+            volumeOk sectorConfirmed freshCross momentumScore
+          }
           breakout {
             side asOfDate confirmed closePrice level20d
             volumeRatio adx rsi patternType

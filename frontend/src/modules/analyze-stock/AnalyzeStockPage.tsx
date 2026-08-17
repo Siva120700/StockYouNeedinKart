@@ -523,6 +523,54 @@ export default function AnalyzeStockPage() {
 
           <Divider />
 
+          <Section title="Momentum (live for this stock)">
+            <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
+              <Metric
+                label="Momentum V2"
+                value={
+                  result.momentumV2
+                    ? `${result.momentumV2.momentumScore.toFixed(1)}/10 · ${result.momentumV2.side.toUpperCase()}`
+                    : "—"
+                }
+              />
+              <Metric
+                label="Momentum V3"
+                value={
+                  result.momentumV3
+                    ? `${result.momentumV3.momentumScore.toFixed(1)}/10 · ${result.momentumV3.side.toUpperCase()}`
+                    : "—"
+                }
+              />
+            </Stack>
+            {(result.momentumV2 ?? result.momentumV3) && (
+              <Stack spacing={1} sx={{ mt: 1.5 }}>
+                {result.momentumV2 && (
+                  <Typography variant="body2" color="text.secondary">
+                    V2: entry {fmt(result.momentumV2.entryPrice)} · SL{" "}
+                    {fmt(result.momentumV2.initialStopLoss)} · T1 {fmt(result.momentumV2.targetT1)} · T2{" "}
+                    {fmt(result.momentumV2.targetT2)} · T3 {fmt(result.momentumV2.targetT3)}
+                    {result.momentumV2.momentumScore <= 5 ? " · below V2 store threshold (>5)" : ""}
+                  </Typography>
+                )}
+                {result.momentumV3 && (
+                  <Typography variant="body2" color="text.secondary">
+                    V3: entry {fmt(result.momentumV3.entryPrice)} · SL{" "}
+                    {fmt(result.momentumV3.initialStopLoss)} · T1 {fmt(result.momentumV3.targetT1)} · T2{" "}
+                    {fmt(result.momentumV3.targetT2)} · T3 {fmt(result.momentumV3.targetT3)}
+                    {result.momentumV3.momentumScore <= 4 ? " · below V3 store threshold (>4)" : ""}
+                  </Typography>
+                )}
+              </Stack>
+            )}
+            {!result.momentumV2 && !result.momentumV3 && (
+              <Typography color="text.secondary" sx={{ mt: 1 }}>
+                No breakout setup or insufficient history for momentum scoring.
+              </Typography>
+            )}
+          </Section>
+
+          <Divider />
+
           <Section title="Engines snapshot">
             <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
               <Metric
@@ -554,6 +602,22 @@ export default function AnalyzeStockPage() {
                 value={
                   result.breakout?.confirmed
                     ? `${result.breakout.patternType ?? "yes"} @ ${fmt(result.breakout.level20d)}`
+                    : "—"
+                }
+              />
+              <Metric
+                label="Momentum V2"
+                value={
+                  result.momentumV2
+                    ? `${result.momentumV2.momentumScore.toFixed(1)}/10`
+                    : "—"
+                }
+              />
+              <Metric
+                label="Momentum V3"
+                value={
+                  result.momentumV3
+                    ? `${result.momentumV3.momentumScore.toFixed(1)}/10`
                     : "—"
                 }
               />

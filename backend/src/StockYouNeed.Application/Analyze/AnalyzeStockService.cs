@@ -23,6 +23,7 @@ public sealed class AnalyzeStockService
     private readonly ConfluenceService _confluence;
     private readonly LiquidityAnalysisService _liquidity;
     private readonly TradeConfidenceService _tradeConfidence;
+    private readonly MomentumAnalysisService _momentum;
 
     public AnalyzeStockService(
         IInstrumentRepository instruments,
@@ -33,7 +34,8 @@ public sealed class AnalyzeStockService
         IBacktestRepository backtest,
         ConfluenceService confluence,
         LiquidityAnalysisService liquidity,
-        TradeConfidenceService tradeConfidence)
+        TradeConfidenceService tradeConfidence,
+        MomentumAnalysisService momentum)
     {
         _instruments = instruments;
         _market = market;
@@ -44,6 +46,7 @@ public sealed class AnalyzeStockService
         _confluence = confluence;
         _liquidity = liquidity;
         _tradeConfidence = tradeConfidence;
+        _momentum = momentum;
     }
 
     public async Task<AnalyzeStockResult> AnalyzeAsync(
@@ -117,6 +120,11 @@ public sealed class AnalyzeStockService
             userId, inst, result.LiquidityFresh, ct);
         result.TradeScore = liveTradeScore.Score;
         result.Signal = liveTradeScore.Signal;
+
+        var (momentumV2, momentumV3) = await _momentum.EvaluateForInstrumentAsync(
+            userId, instrumentId, result.SpotLtp, ct);
+        result.MomentumV2 = momentumV2;
+        result.MomentumV3 = momentumV3;
 
         var breakouts = await _breakout.GetConfirmationsAsync(userId, null, ct);
         var options = await _options.GetRecommendationsAsync(userId, null, ct);

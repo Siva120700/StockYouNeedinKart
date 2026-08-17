@@ -5,6 +5,7 @@ import type {
   BacktestSymbolSummary,
   LiquiditySignal,
   LtpQuote,
+  MomentumSignal,
   OpenPosition,
   Signal,
   UniverseInstrument,
@@ -72,6 +73,21 @@ export const DataFactory = {
       { runId: runId ?? null, ruleset },
     );
     return data.liquiditySignals;
+  },
+
+  async momentumSignals(runId?: string, ruleset: "v2" | "v3" = "v2"): Promise<MomentumSignal[]> {
+    const data = await gql<{ momentumSignals: MomentumSignal[] }>(
+      `query ($runId: UUID, $ruleset: String) {
+        momentumSignals(runId: $runId, ruleset: $ruleset) {
+          id momentumRunId instrumentId appSymbol instrumentName side
+          entryPrice initialStopLoss targetT1 targetT2 targetT3
+          volumeOk sectorConfirmed freshCross momentumScore
+          ${SECTOR_RS_GQL}
+        }
+      }`,
+      { runId: runId ?? null, ruleset },
+    );
+    return data.momentumSignals;
   },
 
   async openPositions(): Promise<OpenPosition[]> {
@@ -190,6 +206,23 @@ export const ActionFactory = {
     return data.runLiquidityAnalysis;
   },
 
+  async runMomentumAnalysis(ruleset: "v2" | "v3" = "v2"): Promise<AnalysisRun> {
+    const data = await gql<{ runMomentumAnalysis: AnalysisRun }>(
+      `mutation ($ruleset: String) {
+        runMomentumAnalysis(
+          includeNifty50: true
+          includeNifty100: true
+          includeWatchlist: true
+          ruleset: $ruleset
+        ) {
+          id status asOfDate
+        }
+      }`,
+      { ruleset },
+    );
+    return data.runMomentumAnalysis;
+  },
+
   async openPositionFromSignal(signalId: string, quantityLots = 1): Promise<string> {
     const data = await gql<{ openPositionFromSignal: string }>(
       `mutation ($signalId: UUID!, $quantityLots: Int!) {
@@ -208,6 +241,16 @@ export const ActionFactory = {
       { signalId, quantityLots },
     );
     return data.openPositionFromLiquiditySignal;
+  },
+
+  async openPositionFromMomentumSignal(signalId: string, quantityLots = 1): Promise<string> {
+    const data = await gql<{ openPositionFromMomentumSignal: string }>(
+      `mutation ($signalId: UUID!, $quantityLots: Int!) {
+        openPositionFromMomentumSignal(signalId: $signalId, quantityLots: $quantityLots)
+      }`,
+      { signalId, quantityLots },
+    );
+    return data.openPositionFromMomentumSignal;
   },
 
   async closePosition(positionId: string, exitPrice: number): Promise<boolean> {

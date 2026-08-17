@@ -27,6 +27,25 @@ export type Signal = {
   sectorRs?: SectorRelativeStrength | null;
 };
 
+export type MomentumSignal = {
+  id: string;
+  momentumRunId: string;
+  instrumentId: string;
+  appSymbol: string;
+  instrumentName: string;
+  side: string;
+  entryPrice: number;
+  initialStopLoss: number;
+  targetT1?: number | null;
+  targetT2?: number | null;
+  targetT3?: number | null;
+  volumeOk: boolean;
+  sectorConfirmed: boolean;
+  freshCross: boolean;
+  momentumScore: number;
+  sectorRs?: SectorRelativeStrength | null;
+};
+
 export type LiquiditySignal = {
   id: string;
   liquidityRunId: string;

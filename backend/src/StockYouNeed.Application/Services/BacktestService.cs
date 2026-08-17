@@ -46,9 +46,11 @@ public sealed class BacktestService
         CancellationToken ct = default)
     {
         strategy = strategy.Trim().ToLowerInvariant();
-        if (strategy is not ("signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout"))
+        if (strategy is not ("signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence"
+                or "trade_score" or "breakout" or "momentum_v2" or "momentum_v3"))
             throw new ArgumentException(
-                "Strategy must be 'signals', 'liquidity', 'liquidity_fresh', 'liquidity_v2', 'confluence', 'trade_score', or 'breakout'.");
+                "Strategy must be 'signals', 'liquidity', 'liquidity_fresh', 'liquidity_v2', 'confluence', " +
+                "'trade_score', 'breakout', 'momentum_v2', or 'momentum_v3'.");
 
         if (!_options.Enabled)
             throw new InvalidOperationException("Angel is disabled; cannot fetch historical candles.");
@@ -59,7 +61,10 @@ public sealed class BacktestService
 
         var toIst = DateTime.Now;
         var fromIst = toIst.Date.AddYears(-1).AddDays(-15); // warmup buffer
-        var sectorBars = await LoadSectorDailyBarsAsync(token.InstrumentId, fromIst, toIst, ct);
+        var isMomentum = strategy is "momentum_v2" or "momentum_v3";
+        // V3 12–1 horizon needs ~253 trading days before the 1Y replay window.
+        var fetchFrom = isMomentum ? toIst.Date.AddYears(-2).AddDays(-30) : fromIst;
+        var sectorBars = await LoadSectorDailyBarsAsync(token.InstrumentId, fetchFrom, toIst, ct);
 
         List<BacktestNoteRow> notes;
         if (strategy == "signals")
@@ -70,6 +75,8 @@ public sealed class BacktestService
             notes = await ReplayTradeScoreAsync(userId, token, fromIst, toIst, sectorBars, ct);
         else if (strategy == "breakout")
             notes = await ReplayBreakoutAsync(userId, token, fromIst, toIst, sectorBars, ct);
+        else if (strategy is "momentum_v2" or "momentum_v3")
+            notes = await ReplayMomentumAsync(userId, token, fetchFrom, toIst, sectorBars, ct, strategy);
         else
             notes = await ReplayLiquidityAsync(userId, token, fromIst, toIst, sectorBars, ct, strategy);
 
@@ -205,6 +212,154 @@ public sealed class BacktestService
         }
 
         return notes;
+    }
+
+    private async Task<List<BacktestNoteRow>> ReplayMomentumAsync(
+        Guid userId, AngelTokenRow token, DateTime fromIst, DateTime toIst,
+        IReadOnlyList<MarketBarRow> sectorBars, CancellationToken ct,
+        string strategy)
+    {
+        var candles = await FetchDailyChunkedAsync(token, fromIst, toIst, ct);
+        var chron = candles
+            .GroupBy(c => c.TradeDate)
+            .Select(g => g.OrderByDescending(c => c.BarTime ?? DateTimeOffset.MinValue).First())
+            .OrderBy(c => c.TradeDate)
+            .ToList();
+
+        var useV3 = strategy == "momentum_v3";
+        var minTotal = useV3
+            ? MomentumScoreHelpers.TradingDays12M + 1
+            : 10;
+        var startIdx = useV3
+            ? MomentumScoreHelpers.TradingDays12M
+            : 8;
+        var replayFrom = DateOnly.FromDateTime(toIst.Date.AddYears(-1));
+
+        if (chron.Count < minTotal)
+            throw new InvalidOperationException(
+                $"Not enough daily history ({chron.Count} bars) for momentum backtest — need ≥{minTotal}.");
+
+        var bars = chron.Select(c => new MarketBarRow
+        {
+            InstrumentId = token.InstrumentId,
+            AppSymbol = token.AppSymbol,
+            TradeDate = c.TradeDate,
+            Open = c.Open,
+            High = c.High,
+            Low = c.Low,
+            Close = c.Close,
+            Volume = c.Volume
+        }).ToList();
+
+        var niftyAll = await LoadNiftyDailyFromAngelAsync(fromIst, toIst, ct);
+        var notes = new List<BacktestNoteRow>();
+        var runId = Guid.Empty;
+        var breakouts = 0;
+        var aboveScoreFloor = 0;
+
+        for (var i = startIdx; i < bars.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var asOf = bars[i].TradeDate;
+            if (asOf < replayFrom)
+                continue;
+
+            var window = bars.Take(i + 1).Reverse().ToList();
+            // Match Signals backtest — actionableOnly is for live LTP gates, not historical replay.
+            var signal = BreakoutSignalEvaluator.Evaluate(userId, runId, asOf, window, livePrice: null);
+            if (signal is null)
+                continue;
+
+            breakouts++;
+
+            List<MarketBarRow>? niftyNewest = null;
+            if (niftyAll is { Count: > 0 })
+            {
+                niftyNewest = niftyAll
+                    .Where(b => b.TradeDate <= asOf)
+                    .OrderByDescending(b => b.TradeDate)
+                    .ToList();
+            }
+
+            var score = useV3
+                ? MomentumScoreV3Evaluator.ScoreSingleStock(signal.Side, window, niftyNewest)
+                : MomentumScoreV2Evaluator.Score(signal.Side, window, niftyNewest, livePrice: null);
+
+            if (score is not decimal s || s <= MomentumAnalysisService.MinScoreForRuleset(strategy))
+                continue;
+
+            aboveScoreFloor++;
+
+            if (!MeetsMinRiskReward(signal.EntryPrice, signal.InitialStopLoss, signal.TargetT1))
+                continue;
+
+            if (IsFlipBlocked(notes, signal.Side, asOf))
+                continue;
+
+            var forward = bars.Skip(i + 1).Take(DailyTimeStopBars).ToList();
+            var outcome = SimulateOutcome(
+                signal.Side, signal.EntryPrice, signal.InitialStopLoss,
+                signal.TargetT1, signal.TargetT2, signal.TargetT3,
+                forward.Select(b => (b.High, b.Low, b.Close, (DateOnly?)b.TradeDate, (DateTimeOffset?)null)).ToList());
+
+            var note = ToNote(userId, token, strategy, signal.Side, asOf,
+                signal.EntryPrice, signal.InitialStopLoss,
+                signal.TargetT1, signal.TargetT2, signal.TargetT3, outcome,
+                EvalSectorConfirmed(sectorBars, signal.Side, asOf));
+            note.Notes = $"auto:1y score={s}";
+            notes.Add(note);
+        }
+
+        _logger.LogInformation(
+            "Momentum replay {Strategy} {Symbol}: bars={Bars}, breakouts={Breakouts}, aboveMin={Scored}, notes={Notes}",
+            strategy, token.AppSymbol, bars.Count, breakouts, aboveScoreFloor, notes.Count);
+
+        return notes;
+    }
+
+    private async Task<List<MarketBarRow>?> LoadNiftyDailyFromAngelAsync(
+        DateTime fromIst, DateTime toIst, CancellationToken ct)
+    {
+        var tokens = await _instruments.GetActiveTokensForUniversesAsync(ct);
+        foreach (var symbol in new[] { "NIFTY", "NIFTY 50", "NIFTY50" })
+        {
+            var inst = await _instruments.FindBySymbolAsync(symbol, ct);
+            if (inst is null)
+                continue;
+
+            var token = tokens.FirstOrDefault(t => t.InstrumentId == inst.Id);
+            if (token is null)
+                continue;
+
+            try
+            {
+                var candles = await FetchDailyChunkedAsync(token, fromIst, toIst, ct);
+                var bars = candles
+                    .GroupBy(c => c.TradeDate)
+                    .Select(g => g.First())
+                    .OrderBy(c => c.TradeDate)
+                    .Select(c => new MarketBarRow
+                    {
+                        InstrumentId = token.InstrumentId,
+                        AppSymbol = token.AppSymbol,
+                        TradeDate = c.TradeDate,
+                        Open = c.Open,
+                        High = c.High,
+                        Low = c.Low,
+                        Close = c.Close,
+                        Volume = c.Volume,
+                    })
+                    .ToList();
+                if (bars.Count >= 5)
+                    return bars;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Nifty daily history unavailable for momentum backtest.");
+            }
+        }
+
+        return null;
     }
 
     private async Task<List<BacktestNoteRow>> ReplayLiquidityAsync(

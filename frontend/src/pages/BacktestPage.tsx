@@ -45,6 +45,8 @@ const ALL_BACKTEST_STRATEGIES = [
   "confluence",
   "trade_score",
   "breakout",
+  "momentum_v2",
+  "momentum_v3",
 ] as const;
 
 type BacktestStrategy = (typeof ALL_BACKTEST_STRATEGIES)[number];
@@ -81,6 +83,8 @@ function strategyLabel(strategy: string | null | undefined): string {
   if (strategy === "liquidity_v2") return "Liquidity V2";
   if (strategy === "liquidity") return "Liquidity";
   if (strategy === "signals") return "Signals";
+  if (strategy === "momentum_v2") return "Momentum V2";
+  if (strategy === "momentum_v3") return "Momentum V3";
   return strategy ?? "";
 }
 

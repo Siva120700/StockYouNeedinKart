@@ -41,6 +41,8 @@ const ALL_OUTCOME_STRATEGIES = [
   "confluence",
   "trade_score",
   "breakout",
+  "momentum_v2",
+  "momentum_v3",
   "options_intraday",
   "nifty_orb",
   "nifty_orb_liq_v2",

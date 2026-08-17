@@ -18,12 +18,12 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
               id, user_id, instrument_id, strategy, side, signal_date,
               entry_price, initial_stop_loss, target_t1, target_t2, target_t3,
               result, analysis_signal_id, liquidity_signal_id,
-              trade_confidence_score_id, breakout_confirmation_id, sector_confirmed)
+              trade_confidence_score_id, breakout_confirmation_id, momentum_signal_id, sector_confirmed)
             VALUES (
               @Id, @UserId, @InstrumentId, @Strategy, @Side::signal_side, @SignalDate,
               @EntryPrice, @InitialStopLoss, @TargetT1, @TargetT2, @TargetT3,
               'open', @AnalysisSignalId, @LiquiditySignalId,
-              @TradeConfidenceScoreId, @BreakoutConfirmationId, @SectorConfirmed)
+              @TradeConfidenceScoreId, @BreakoutConfirmationId, @MomentumSignalId, @SectorConfirmed)
             ON CONFLICT (user_id, strategy, instrument_id, side, signal_date) DO NOTHING
             """;
         using var conn = _db.CreateConnection();
@@ -56,6 +56,7 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
               o.liquidity_signal_id AS LiquiditySignalId,
               o.trade_confidence_score_id AS TradeConfidenceScoreId,
               o.breakout_confirmation_id AS BreakoutConfirmationId,
+              o.momentum_signal_id AS MomentumSignalId,
               o.sector_confirmed AS SectorConfirmed,
               o.created_at AS CreatedAt,
               o.updated_at AS UpdatedAt

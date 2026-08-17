@@ -86,6 +86,27 @@ public sealed class SignalOutcomeService
         }, ct);
     }
 
+    public Task OpenFromMomentumAsync(MomentumSignalRow signal, string ruleset, CancellationToken ct = default)
+    {
+        var strategy = NormalizeRuleset(ruleset) == "v3" ? "momentum_v3" : "momentum_v2";
+        return OpenAsync(new SignalOutcomeRow
+        {
+            Id = Guid.NewGuid(),
+            UserId = signal.UserId,
+            InstrumentId = signal.InstrumentId,
+            Strategy = strategy,
+            Side = signal.Side,
+            SignalDate = signal.AsOfDate,
+            EntryPrice = signal.EntryPrice,
+            InitialStopLoss = signal.InitialStopLoss,
+            TargetT1 = signal.TargetT1,
+            TargetT2 = signal.TargetT2,
+            TargetT3 = signal.TargetT3,
+            MomentumSignalId = signal.Id == Guid.Empty ? null : signal.Id,
+            SectorConfirmed = signal.SectorConfirmed,
+        }, ct);
+    }
+
     public Task OpenFromConfluenceAsync(ConfluenceSignalRow signal, CancellationToken ct = default)
         => OpenAsync(new SignalOutcomeRow
         {
@@ -157,6 +178,12 @@ public sealed class SignalOutcomeService
             BreakoutConfirmationId = row.Id,
             SectorConfirmed = false,
         }, ct);
+    }
+
+    private static string NormalizeRuleset(string? ruleset)
+    {
+        var s = (ruleset ?? "v2").Trim().ToLowerInvariant();
+        return s == "v3" ? "v3" : "v2";
     }
 
     public Task<IReadOnlyList<SignalOutcomeRow>> GetOutcomesAsync(
@@ -249,6 +276,18 @@ public sealed class SignalOutcomeService
         foreach (var score in await _tradeScore.GetScoresAsync(userId, null, ct))
         {
             await OpenFromTradeScoreAsync(score, ct);
+            opened++;
+        }
+
+        foreach (var sig in await _portfolio.GetMomentumSignalsAsync(userId, null, "v2", ct))
+        {
+            await OpenFromMomentumAsync(sig, "v2", ct);
+            opened++;
+        }
+
+        foreach (var sig in await _portfolio.GetMomentumSignalsAsync(userId, null, "v3", ct))
+        {
+            await OpenFromMomentumAsync(sig, "v3", ct);
             opened++;
         }
 

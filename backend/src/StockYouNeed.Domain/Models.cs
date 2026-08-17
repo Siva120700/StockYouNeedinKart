@@ -176,6 +176,28 @@ public sealed class AnalysisSignalRow : ISectorRanked
     public SectorRelativeStrengthInfo? SectorRs { get; set; }
 }
 
+public sealed class MomentumSignalRow : ISectorRanked
+{
+    public Guid Id { get; set; }
+    public Guid MomentumRunId { get; set; }
+    public Guid UserId { get; set; }
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string InstrumentName { get; set; } = "";
+    public string Side { get; set; } = "";
+    public DateOnly AsOfDate { get; set; }
+    public decimal EntryPrice { get; set; }
+    public decimal InitialStopLoss { get; set; }
+    public decimal? TargetT1 { get; set; }
+    public decimal? TargetT2 { get; set; }
+    public decimal? TargetT3 { get; set; }
+    public bool VolumeOk { get; set; }
+    public bool SectorConfirmed { get; set; }
+    public bool FreshCross { get; set; }
+    public decimal MomentumScore { get; set; }
+    public SectorRelativeStrengthInfo? SectorRs { get; set; }
+}
+
 public sealed class LiquiditySignalRow : ISectorRanked
 {
     public Guid Id { get; set; }
@@ -429,6 +451,7 @@ public sealed class SignalOutcomeRow
     public Guid? LiquiditySignalId { get; set; }
     public Guid? TradeConfidenceScoreId { get; set; }
     public Guid? BreakoutConfirmationId { get; set; }
+    public Guid? MomentumSignalId { get; set; }
     public bool SectorConfirmed { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -635,6 +658,9 @@ public sealed class AnalyzeStockResult
 
     public BacktestSymbolSummary? BacktestSummary { get; set; }
     public IReadOnlyList<MarketBarRow> RecentBars { get; set; } = Array.Empty<MarketBarRow>();
+
+    public MomentumSignalRow? MomentumV2 { get; set; }
+    public MomentumSignalRow? MomentumV3 { get; set; }
 }
 
 public sealed class AnalyzeStockSetup

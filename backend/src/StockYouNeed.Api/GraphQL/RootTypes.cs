@@ -57,6 +57,16 @@ public sealed class Query
         => await sectorScope.RankAsync(
             await portfolio.GetLiquiditySignalsAsync(user.UserId, runId, ruleset ?? "classic", ct), ct);
 
+    public async Task<IReadOnlyList<MomentumSignalRow>> MomentumSignals(
+        Guid? runId,
+        string? ruleset,
+        [Service] ICurrentUserAccessor user,
+        [Service] IPortfolioRepository portfolio,
+        [Service] Application.SectorScope.SectorScopeService sectorScope,
+        CancellationToken ct)
+        => await sectorScope.RankAsync(
+            await portfolio.GetMomentumSignalsAsync(user.UserId, runId, ruleset ?? "v2", ct), ct);
+
     public async Task<IReadOnlyList<ConfluenceSignalRow>> ConfluenceSignals(
         [Service] ICurrentUserAccessor user,
         [Service] Application.Confluence.ConfluenceService confluence,
@@ -312,7 +322,7 @@ public sealed class Query
     {
         if (string.IsNullOrWhiteSpace(strategy)) return null;
         var s = strategy.Trim().ToLowerInvariant();
-        return s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout" or "options_intraday" or "nifty_orb" or "nifty_orb_liq_v2" or "nifty_liq_breakout" or "nifty_breakout_volume" or "nifty_hero_zero" or "nifty_breakout_chain" ? s : null;
+        return s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout" or "momentum_v2" or "momentum_v3" or "options_intraday" or "nifty_orb" or "nifty_orb_liq_v2" or "nifty_liq_breakout" or "nifty_breakout_volume" or "nifty_hero_zero" or "nifty_breakout_chain" ? s : null;
     }
 
     private static string? NormalizeOutcomeResult(string? result)
@@ -379,6 +389,32 @@ public sealed class Mutation
             ruleset ?? "classic",
             requireRetest ?? false,
             requireRelativeStrength ?? false);
+
+    public async Task<AnalysisRunRow> RunMomentumAnalysis(
+        bool includeNifty50,
+        bool includeNifty100,
+        bool includeWatchlist,
+        string? ruleset,
+        [Service] ICurrentUserAccessor user,
+        [Service] MomentumAnalysisService analysis,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await analysis.RunAsync(
+                user.UserId,
+                includeNifty50,
+                includeNifty100,
+                includeWatchlist,
+                "manual",
+                ruleset ?? "v2",
+                ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
 
     public async Task<TradeConfidenceRunRow> RunTradeConfidenceAnalysis(
         bool refreshSignals,
@@ -448,6 +484,15 @@ public sealed class Mutation
         [Service] IPortfolioRepository portfolio,
         CancellationToken ct)
         => await portfolio.OpenPositionFromLiquiditySignalAsync(
+            user.UserId, signalId, quantityLots <= 0 ? 1 : quantityLots, ct);
+
+    public async Task<Guid> OpenPositionFromMomentumSignal(
+        Guid signalId,
+        int quantityLots,
+        [Service] ICurrentUserAccessor user,
+        [Service] IPortfolioRepository portfolio,
+        CancellationToken ct)
+        => await portfolio.OpenPositionFromMomentumSignalAsync(
             user.UserId, signalId, quantityLots <= 0 ? 1 : quantityLots, ct);
 
     public async Task<Guid> OpenPositionFromConfluence(

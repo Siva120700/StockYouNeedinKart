@@ -375,7 +375,7 @@ public sealed class BacktestRepository : IBacktestRepository
         var filters = strategies?
             .Select(s => s.Trim().ToLowerInvariant())
             .Where(s => s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2"
-                or "confluence" or "trade_score" or "breakout")
+                or "confluence" or "trade_score" or "breakout" or "momentum_v2" or "momentum_v3")
             .Distinct()
             .ToArray();
 
@@ -434,9 +434,11 @@ public sealed class BacktestRepository : IBacktestRepository
     private static void NormalizeNote(BacktestNoteRow note)
     {
         note.Strategy = note.Strategy.Trim().ToLowerInvariant();
-        if (note.Strategy is not ("signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout"))
+        if (note.Strategy is not ("signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence"
+                or "trade_score" or "breakout" or "momentum_v2" or "momentum_v3"))
             throw new ArgumentException(
-                "Strategy must be 'signals', 'liquidity', 'liquidity_fresh', 'liquidity_v2', 'confluence', 'trade_score', or 'breakout'.");
+                "Strategy must be 'signals', 'liquidity', 'liquidity_fresh', 'liquidity_v2', 'confluence', " +
+                "'trade_score', 'breakout', 'momentum_v2', or 'momentum_v3'.");
 
         note.Side = note.Side.Trim().ToLowerInvariant();
         if (note.Side is not ("buy" or "sell"))

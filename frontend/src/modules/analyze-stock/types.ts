@@ -10,6 +10,20 @@ export type AnalyzeStockSetup = {
   plannedRiskReward: number | null;
 };
 
+export type MomentumEval = {
+  side: string;
+  asOfDate: string;
+  entryPrice: number;
+  initialStopLoss: number;
+  targetT1: number | null;
+  targetT2: number | null;
+  targetT3: number | null;
+  volumeOk: boolean;
+  sectorConfirmed: boolean;
+  freshCross: boolean;
+  momentumScore: number;
+};
+
 export type AnalyzeStockLevels = {
   pivot: number | null;
   resistance1: number | null;
@@ -130,6 +144,8 @@ export type AnalyzeStockResult = {
     targetT3: number | null;
     breakoutConfirmed: boolean;
   } | null;
+  momentumV2: MomentumEval | null;
+  momentumV3: MomentumEval | null;
   breakout: {
     side: string;
     asOfDate: string;
@@ -203,6 +219,10 @@ export function sourceLabel(source: string): string {
       return "Liquidity";
     case "signals":
       return "Signals";
+    case "momentum_v2":
+      return "Momentum V2";
+    case "momentum_v3":
+      return "Momentum V3";
     default:
       return source;
   }

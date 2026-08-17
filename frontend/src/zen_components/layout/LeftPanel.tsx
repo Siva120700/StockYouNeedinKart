@@ -12,6 +12,7 @@ import {
 import {
   ChartLine,
   Drop,
+  Lightning,
   ListChecks,
   MagnifyingGlass,
   Newspaper,
@@ -32,6 +33,8 @@ const navItems = [
   { to: "/liquidity", label: "Liquidity", icon: Drop },
   { to: "/liquidity-fresh", label: "Liquidity Fresh", icon: Drop },
   { to: "/liquidity-v2", label: "Liquidity V2", icon: Drop },
+  { to: "/momentum-v2", label: "Momentum V2", icon: Lightning },
+  { to: "/momentum-v3", label: "Momentum V3", icon: Lightning },
   { to: "/confluence", label: "Confluence", icon: ChartLine },
   { to: "/breakout", label: "Breakout", icon: ChartLine },
   { to: "/trade-score", label: "Trade Score", icon: ChartLine },

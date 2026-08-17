@@ -50,6 +50,10 @@ export function strategyLabel(strategy: string | null | undefined): string {
       return "Trade Score";
     case "breakout":
       return "Breakout";
+    case "momentum_v2":
+      return "Momentum V2";
+    case "momentum_v3":
+      return "Momentum V3";
     case "options_intraday":
       return "Options Intraday";
     case "nifty_orb":

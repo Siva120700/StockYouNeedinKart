@@ -160,6 +160,15 @@ public interface IPortfolioRepository
         Guid userId, Guid? runId, string ruleset = "classic", CancellationToken ct = default);
     Task<LiquiditySignalRow?> GetLiquiditySignalAsync(Guid signalId, Guid userId, CancellationToken ct = default);
     Task<Guid> OpenPositionFromLiquiditySignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default);
+    Task<Guid> CreateMomentumAnalysisRunAsync(
+        Guid userId, string triggeredBy, bool nifty50, bool nifty100, bool watchlist, DateOnly asOfDate,
+        string ruleset = "v2", CancellationToken ct = default);
+    Task CompleteMomentumAnalysisRunAsync(Guid runId, string status, string? error, object stats, CancellationToken ct = default);
+    Task InsertMomentumSignalAsync(MomentumSignalRow signal, CancellationToken ct = default);
+    Task<IReadOnlyList<MomentumSignalRow>> GetMomentumSignalsAsync(
+        Guid userId, Guid? runId, string ruleset = "v2", CancellationToken ct = default);
+    Task<MomentumSignalRow?> GetMomentumSignalAsync(Guid signalId, Guid userId, CancellationToken ct = default);
+    Task<Guid> OpenPositionFromMomentumSignalAsync(Guid userId, Guid signalId, int quantityLots, CancellationToken ct = default);
     Task<Guid> OpenPositionFromTradeScoreAsync(
         Guid userId, Guid scoreId, int quantityLots, ITradeScoreRepository tradeScore, CancellationToken ct = default);
     Task<Guid> OpenPositionFromConfluenceAsync(
