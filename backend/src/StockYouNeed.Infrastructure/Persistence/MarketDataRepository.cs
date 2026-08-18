@@ -224,14 +224,19 @@ public sealed class MarketDataRepository : IMarketDataRepository
                 last.open
               ) AS PrevClose
             FROM instruments e
-            JOIN universe_memberships u ON u.instrument_id = e.id AND u.valid_to IS NULL
             LEFT JOIN instruments s ON s.id = e.sector_instrument_id AND s.kind = 'sector_index' AND s.is_active
             LEFT JOIN market_ltp l ON l.instrument_id = e.id
             LEFT JOIN market_ohlc o ON o.instrument_id = e.id
             LEFT JOIN ranked last ON last.instrument_id = e.id AND last.rn = 1
             LEFT JOIN ranked prev ON prev.instrument_id = e.id AND prev.rn = 2
             WHERE e.kind = 'equity' AND e.is_active
-              AND u.universe IN ({UniverseCodes.SqlEquityScanIn})
+              AND EXISTS (
+                SELECT 1
+                FROM universe_memberships u
+                WHERE u.instrument_id = e.id
+                  AND u.valid_to IS NULL
+                  AND u.universe IN ({UniverseCodes.SqlEquityScanIn})
+              )
 
             UNION ALL
 
@@ -268,7 +273,11 @@ public sealed class MarketDataRepository : IMarketDataRepository
         using var conn = _db.CreateConnection();
         var rows = await conn.QueryAsync<SectorScopeQuoteRow>(
             new CommandDefinition(sql, cancellationToken: ct));
-        return rows.ToList();
+        // Equities can sit in nifty_50 + nifty_100 + nifty_fno; never emit the same name twice.
+        return rows
+            .GroupBy(r => (r.Kind, r.InstrumentId, r.SectorId))
+            .Select(g => g.First())
+            .ToList();
     }
 
     public async Task<IReadOnlyList<MarketBarRow>> GetBarsAsync(Guid? instrumentId, int limitDays, CancellationToken ct = default)
@@ -343,6 +352,45 @@ public sealed class MarketDataRepository : IMarketDataRepository
         using var conn = _db.CreateConnection();
         var rows = await conn.QueryAsync<MarketIntradayBarRow>(
             new CommandDefinition(sql, new { instrumentId, interval, limitBars }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<MarketIntradayBarRow>> GetIntradayBarsForUniverseAsync(
+        string interval, int limitBarsPerInstrument, CancellationToken ct = default)
+    {
+        var sql = $"""
+            WITH ranked AS (
+              SELECT
+                b.instrument_id AS InstrumentId,
+                i.symbol AS AppSymbol,
+                b.interval AS Interval,
+                b.bar_time AS BarTime,
+                b.open AS Open,
+                b.high AS High,
+                b.low AS Low,
+                b.close AS Close,
+                b.volume AS Volume,
+                ROW_NUMBER() OVER (PARTITION BY b.instrument_id ORDER BY b.bar_time DESC) AS rn
+              FROM market_intraday_bars b
+              JOIN instruments i ON i.id = b.instrument_id
+              WHERE b.interval = @interval
+                AND i.kind = 'equity' AND i.is_active
+                AND EXISTS (
+                  SELECT 1
+                  FROM universe_memberships u
+                  WHERE u.instrument_id = i.id
+                    AND u.valid_to IS NULL
+                    AND u.universe IN ({UniverseCodes.SqlEquityScanIn})
+                )
+            )
+            SELECT InstrumentId, AppSymbol, Interval, BarTime, Open, High, Low, Close, Volume
+            FROM ranked
+            WHERE rn <= @limitBarsPerInstrument
+            ORDER BY InstrumentId, BarTime DESC
+            """;
+        using var conn = _db.CreateConnection();
+        var rows = await conn.QueryAsync<MarketIntradayBarRow>(
+            new CommandDefinition(sql, new { interval, limitBarsPerInstrument }, cancellationToken: ct));
         return rows.ToList();
     }
 

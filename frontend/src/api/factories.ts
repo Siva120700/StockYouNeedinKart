@@ -9,6 +9,7 @@ import type {
   MomentumFuturesSuggestion,
   OpenPosition,
   Signal,
+  SpikeScanRow,
   UniverseInstrument,
   User,
   WatchlistItem,
@@ -34,6 +35,20 @@ export const DataFactory = {
       { ltp { instrumentId appSymbol instrumentName exchange ltp fetchedAt } }
     `);
     return data.ltp;
+  },
+
+  async spikeScan(): Promise<SpikeScanRow[]> {
+    const data = await gql<{ spikeScan: SpikeScanRow[] }>(`
+      {
+        spikeScan {
+          instrumentId appSymbol side barTime forming
+          open high low close volume
+          changePct rangePct relativeVolume spikeScore
+          entryPrice initialStopLoss targetT1 targetT2 targetT3
+        }
+      }
+    `);
+    return data.spikeScan;
   },
 
   async universes(): Promise<UniverseInstrument[]> {
@@ -262,6 +277,20 @@ export const ActionFactory = {
       { ruleset },
     );
     return data.runMomentumAnalysis;
+  },
+
+  async runSpikeScan(): Promise<SpikeScanRow[]> {
+    const data = await gql<{ runSpikeScan: SpikeScanRow[] }>(
+      `mutation {
+        runSpikeScan {
+          instrumentId appSymbol side barTime forming
+          open high low close volume
+          changePct rangePct relativeVolume spikeScore
+          entryPrice initialStopLoss targetT1 targetT2 targetT3
+        }
+      }`,
+    );
+    return data.runSpikeScan;
   },
 
   async openPositionFromSignal(signalId: string, quantityLots = 1): Promise<string> {

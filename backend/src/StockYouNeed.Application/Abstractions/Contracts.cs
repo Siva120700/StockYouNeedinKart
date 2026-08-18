@@ -138,6 +138,7 @@ public interface IMarketDataRepository
     Task<IReadOnlyList<MarketBarRow>> GetBarsAsync(Guid? instrumentId, int limitDays, CancellationToken ct = default);
     Task<IReadOnlyList<MarketBarRow>> GetBarsForInstrumentAsync(Guid instrumentId, int limitDays, CancellationToken ct = default);
     Task<IReadOnlyList<MarketIntradayBarRow>> GetIntradayBarsForInstrumentAsync(Guid instrumentId, string interval, int limitBars, CancellationToken ct = default);
+    Task<IReadOnlyList<MarketIntradayBarRow>> GetIntradayBarsForUniverseAsync(string interval, int limitBarsPerInstrument, CancellationToken ct = default);
     Task<int> CountIntradayBarsAsync(Guid instrumentId, string interval, CancellationToken ct = default);
     Task<DateTimeOffset?> GetLatestIntradayBarTimeAsync(Guid instrumentId, string interval, CancellationToken ct = default);
     Task LogQuoteFetchBatchAsync(string mode, int requested, int fetched, int unfetched, bool statusOk, string? message, string? errorCode, string exchangeTokensJson, string unfetchedJson, Guid? analysisRunId, int? durationMs, CancellationToken ct = default);

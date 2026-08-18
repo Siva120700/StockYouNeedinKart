@@ -42,6 +42,7 @@ public sealed class IndexOptionNotificationService
             NiftyOrbService.SourceOrb or NiftyOrbService.SourceLiqBreakout
                 or NiftyOrbService.SourceBreakoutVolume
                 or NiftyOrbService.SourceBreakoutChain
+                or NiftyOrbService.SourceMomentumV2
                 => rec.ConfidenceScore >= MinConfidenceOrb,
             NiftyOrbService.SourceHeroZero => false,
             _ => rec.ConfidenceScore >= MinConfidenceOrb,

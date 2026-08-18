@@ -17,8 +17,20 @@ public sealed class SectorScopeService
 
     public async Task<SectorScopeSnapshot> GetSnapshotAsync(CancellationToken ct = default)
     {
-        var quotes = await _market.GetSectorScopeQuotesAsync(ct);
-        return BuildSnapshot(quotes, DateTimeOffset.UtcNow);
+        var quotes = (await _market.GetSectorScopeQuotesAsync(ct))
+            .GroupBy(q => (q.Kind, q.InstrumentId, q.SectorId))
+            .Select(g => g.First())
+            .ToList();
+        var snap = BuildSnapshot(quotes, DateTimeOffset.UtcNow);
+        foreach (var sector in snap.Sectors)
+        {
+            sector.Stocks = sector.Stocks
+                .GroupBy(s => s.InstrumentId)
+                .Select(g => g.First())
+                .ToList();
+            sector.ConstituentCount = sector.Stocks.Count;
+        }
+        return snap;
     }
 
     public async Task<IReadOnlyList<T>> RankAsync<T>(IReadOnlyList<T> rows, CancellationToken ct = default)
@@ -75,7 +87,10 @@ public sealed class SectorScopeService
             .Select(g =>
             {
                 var index = g.FirstOrDefault(x => x.Kind == "sector_index") ?? g.First();
-                var equities = g.Where(x => x.Kind == "equity").ToList();
+                var equities = g.Where(x => x.Kind == "equity")
+                    .GroupBy(x => x.InstrumentId)
+                    .Select(eg => eg.First())
+                    .ToList();
                 var equityChanges = equities
                     .Select(ChangePct)
                     .Where(p => p is not null)

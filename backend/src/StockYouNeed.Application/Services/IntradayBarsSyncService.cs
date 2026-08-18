@@ -10,9 +10,12 @@ namespace StockYouNeed.Application.Services;
 public sealed class IntradayBarsSyncService
 {
     public const string Interval1h = "1h";
+    public const string Interval15m = "15m";
     private const int LookbackSessions = 15;
     /// <summary>Skip Angel fetch only when latest 1H bar is newer than this (avoids stale liquidity).</summary>
-    private static readonly TimeSpan MaxStale = TimeSpan.FromHours(3);
+    private static readonly TimeSpan MaxStale1h = TimeSpan.FromHours(3);
+    /// <summary>A 15m bar is stale once the next candle should have started.</summary>
+    private static readonly TimeSpan MaxStale15m = TimeSpan.FromMinutes(16);
 
     private readonly IAngelMarketDataClient _angel;
     private readonly IInstrumentRepository _instruments;
@@ -73,7 +76,7 @@ public sealed class IntradayBarsSyncService
                 var latest = await _market.GetLatestIntradayBarTimeAsync(
                     token.InstrumentId, Interval1h, ct);
 
-                if (!force && latest is not null && nowUtc - latest.Value <= MaxStale)
+                if (!force && latest is not null && nowUtc - latest.Value <= MaxStale1h)
                 {
                     skippedFresh++;
                     continue;
@@ -134,7 +137,7 @@ public sealed class IntradayBarsSyncService
         var nowUtc = DateTimeOffset.UtcNow;
 
         var latest = await _market.GetLatestIntradayBarTimeAsync(token.InstrumentId, Interval1h, ct);
-        if (!force && latest is not null && nowUtc - latest.Value <= MaxStale)
+        if (!force && latest is not null && nowUtc - latest.Value <= MaxStale1h)
             return 0;
 
         var fromIst = fullFromIst;
@@ -161,6 +164,89 @@ public sealed class IntradayBarsSyncService
 
         _logger.LogInformation(
             "Intraday 1H sync for {Symbol}: upserted {Count} bars.", token.AppSymbol, upserted);
+        return upserted;
+    }
+
+    /// <summary>
+    /// Refresh 15-minute bars for universe equities. Skips a symbol when its latest 15m bar
+    /// is newer than <see cref="MaxStale15m"/>. First pass pulls ~4 calendar days.
+    /// </summary>
+    public async Task<int> SyncUniverseFifteenMinuteAsync(CancellationToken ct = default, bool force = false)
+    {
+        if (!_angelOptions.Enabled)
+        {
+            _logger.LogWarning("Angel disabled; skipping 15m bar sync.");
+            return 0;
+        }
+
+        await _angel.EnsureSessionAsync(ct);
+        await _tokenSync.EnsureUniverseTokensMappedAsync(ct);
+        var tokens = await _instruments.GetActiveTokensForUniversesAsync(ct);
+        if (tokens.Count == 0)
+        {
+            _logger.LogWarning("No Angel tokens for 15m sync.");
+            return 0;
+        }
+
+        var toIst = DateTime.Now;
+        var fullFromIst = toIst.Date.AddDays(-4);
+        var nowUtc = DateTimeOffset.UtcNow;
+        var upserted = 0;
+        var skippedFresh = 0;
+        var refreshed = 0;
+
+        foreach (var token in tokens)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var latest = await _market.GetLatestIntradayBarTimeAsync(
+                    token.InstrumentId, Interval15m, ct);
+
+                if (!force && latest is not null && nowUtc - latest.Value <= MaxStale15m)
+                {
+                    skippedFresh++;
+                    continue;
+                }
+
+                var fromIst = fullFromIst;
+                if (latest is not null && !force)
+                {
+                    var latestIst = latest.Value.ToOffset(TimeSpan.FromHours(5.5)).DateTime;
+                    fromIst = latestIst.AddHours(-2);
+                    if (fromIst < fullFromIst)
+                        fromIst = fullFromIst;
+                }
+
+                var candles = await _angel.GetFifteenMinuteCandlesAsync(
+                    token.Exchange, token.SymbolToken, fromIst, toIst, ct);
+
+                foreach (var c in candles)
+                {
+                    if (c.BarTime is null)
+                        continue;
+                    await _market.UpsertIntradayBarAsync(
+                        token.InstrumentId,
+                        Interval15m,
+                        c.BarTime.Value,
+                        c.Open, c.High, c.Low, c.Close, c.Volume,
+                        ct);
+                    upserted++;
+                }
+
+                refreshed++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "15m sync failed for {Symbol}", token.AppSymbol);
+            }
+
+            await Task.Delay(900, ct);
+        }
+
+        _logger.LogInformation(
+            "Intraday 15m sync upserted {Count} bars (refreshed={Refreshed}, skippedFresh={Skipped}).",
+            upserted, refreshed, skippedFresh);
         return upserted;
     }
 }

@@ -190,6 +190,28 @@ export type BacktestSymbolSummary = {
   avgRMultiple?: number | null;
 };
 
+export type SpikeScanRow = {
+  instrumentId: string;
+  appSymbol: string;
+  side: string;
+  barTime: string;
+  forming: boolean;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  changePct: number;
+  rangePct: number;
+  relativeVolume: number;
+  spikeScore: number;
+  entryPrice: number;
+  initialStopLoss: number;
+  targetT1?: number | null;
+  targetT2?: number | null;
+  targetT3?: number | null;
+};
+
 export type BacktestNoteInput = {
   id?: string | null;
   instrumentId: string;

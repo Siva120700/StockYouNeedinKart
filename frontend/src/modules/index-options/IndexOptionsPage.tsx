@@ -43,6 +43,7 @@ const SOURCE_COMBO = "nifty_orb_liq_v2";
 const SOURCE_LIQ_BO = "nifty_liq_breakout";
 const SOURCE_BRK_VOL = "nifty_breakout_volume";
 const SOURCE_BRK_CHAIN = "nifty_breakout_chain";
+const SOURCE_MOMENTUM_V2 = "nifty_momentum_v2";
 const SOURCE_HERO_ZERO = "nifty_hero_zero";
 const POLL_MS = 45_000;
 
@@ -81,6 +82,7 @@ function sourceLabel(source: string): string {
   if (source === SOURCE_LIQ_BO) return "Liquidity + Breakout";
   if (source === SOURCE_BRK_VOL) return "Breakout + Volume";
   if (source === SOURCE_BRK_CHAIN) return "Breakout + Chain";
+  if (source === SOURCE_MOMENTUM_V2) return "Momentum V2";
   if (source === SOURCE_HERO_ZERO) return "Hero Zero";
   return "Nifty ORB";
 }
@@ -477,6 +479,7 @@ export default function IndexOptionsPage() {
   const [expandedLiqBoId, setExpandedLiqBoId] = useState<string | null>(null);
   const [expandedBrkVolId, setExpandedBrkVolId] = useState<string | null>(null);
   const [expandedBrkChainId, setExpandedBrkChainId] = useState<string | null>(null);
+  const [expandedMomentumV2Id, setExpandedMomentumV2Id] = useState<string | null>(null);
   const [expandedHeroZeroId, setExpandedHeroZeroId] = useState<string | null>(null);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
   const [chain, setChain] = useState<NiftyOptionChainSnapshot | null>(null);
@@ -498,6 +501,7 @@ export default function IndexOptionsPage() {
         ratesLiqBo,
         ratesBrkVol,
         ratesBrkChain,
+        ratesMomentumV2,
         ratesHeroZero,
         chainSnap,
       ] = await Promise.all([
@@ -507,6 +511,7 @@ export default function IndexOptionsPage() {
         loadHistoricalHitRates("nifty_liq_breakout"),
         loadHistoricalHitRates("nifty_breakout_volume"),
         loadHistoricalHitRates("nifty_breakout_chain"),
+        loadHistoricalHitRates("nifty_momentum_v2"),
         loadHistoricalHitRates("nifty_hero_zero"),
         IndexOptionsApi.fetchOptionChain().catch(() => null),
       ]);
@@ -517,6 +522,7 @@ export default function IndexOptionsPage() {
       for (const [k, v] of ratesLiqBo) merged.set(k, v);
       for (const [k, v] of ratesBrkVol) merged.set(k, v);
       for (const [k, v] of ratesBrkChain) merged.set(k, v);
+      for (const [k, v] of ratesMomentumV2) merged.set(k, v);
       for (const [k, v] of ratesHeroZero) merged.set(k, v);
       setHitRates(merged);
       if (chainSnap) setChain(chainSnap);
@@ -610,6 +616,12 @@ export default function IndexOptionsPage() {
     return list.filter((r) => r.status === statusFilter);
   }, [rows, statusFilter]);
 
+  const momentumV2Rows = useMemo(() => {
+    const list = rows.filter((r) => r.signalSource === SOURCE_MOMENTUM_V2);
+    if (statusFilter === "all") return list;
+    return list.filter((r) => r.status === statusFilter);
+  }, [rows, statusFilter]);
+
   const heroZeroRows = useMemo(() => {
     const list = rows.filter((r) => r.signalSource === SOURCE_HERO_ZERO);
     if (statusFilter === "all") return list;
@@ -622,6 +634,7 @@ export default function IndexOptionsPage() {
     liqBoRows.length +
     brkVolRows.length +
     brkChainRows.length +
+    momentumV2Rows.length +
     heroZeroRows.length;
 
   const columns = buildColumns(tab, onTrade);
@@ -756,6 +769,16 @@ export default function IndexOptionsPage() {
             loading={loading}
             expandedId={expandedBrkChainId}
             onExpand={setExpandedBrkChainId}
+          />
+
+          <SectionTable
+            title="Momentum V2"
+            blurb="Same rules as equity Momentum V2: Nifty 2-day breakout (actionable) plus composite score ≥ 4 (Average tier and above). CE/PE ticket via Δ × Nifty levels — 1 ITM primary + ATM alt. Confidence scales with score; ≥80 triggers bell alerts. Flat by 14:30 IST."
+            rows={momentumV2Rows}
+            columns={columns}
+            loading={loading}
+            expandedId={expandedMomentumV2Id}
+            onExpand={setExpandedMomentumV2Id}
           />
 
           <SectionTable

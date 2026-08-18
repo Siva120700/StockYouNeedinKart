@@ -54,6 +54,8 @@ public sealed class DatabaseMigrator
             Path.Combine(databaseRoot, "029_momentum_scores.sql"),
             Path.Combine(databaseRoot, "030_momentum_strategies.sql"),
             Path.Combine(databaseRoot, "031_nifty_fno_universe.sql"),
+            Path.Combine(databaseRoot, "032_intraday_15m.sql"),
+            Path.Combine(databaseRoot, "033_nifty_momentum_v2.sql"),
         };
 
         await using var conn = new NpgsqlConnection(_db.ConnectionString);

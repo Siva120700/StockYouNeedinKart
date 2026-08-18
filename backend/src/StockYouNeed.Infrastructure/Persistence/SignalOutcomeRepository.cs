@@ -11,6 +11,16 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
 
     public SignalOutcomeRepository(IDbConnectionFactory db) => _db = db;
 
+    /// <summary>Hide sub-average Momentum V2 rows (Accuracy matches live Momentum V2 tab).</summary>
+    private const string MomentumV2ScoreFilter = """
+        (o.strategy <> 'momentum_v2'
+         OR EXISTS (
+           SELECT 1 FROM momentum_signals m
+           WHERE m.id = o.momentum_signal_id
+             AND m.momentum_score >= @minMomentumV2Score
+         ))
+        """;
+
     public async Task OpenAsync(SignalOutcomeRow row, CancellationToken ct = default)
     {
         const string sql = """
@@ -87,9 +97,11 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
         var filters = new List<string>
         {
             "o.user_id = @userId",
+            MomentumV2ScoreFilter,
         };
         var p = new DynamicParameters();
         p.Add("userId", userId);
+        p.Add("minMomentumV2Score", MomentumRules.MinScoreV2);
 
         if (!string.IsNullOrWhiteSpace(strategy))
         {
@@ -161,9 +173,11 @@ public sealed class SignalOutcomeRepository : ISignalOutcomeRepository
         var filters = new List<string>
         {
             "o.user_id = @userId",
+            MomentumV2ScoreFilter,
         };
         var p = new DynamicParameters();
         p.Add("userId", userId);
+        p.Add("minMomentumV2Score", MomentumRules.MinScoreV2);
 
         if (!string.IsNullOrWhiteSpace(strategy))
         {

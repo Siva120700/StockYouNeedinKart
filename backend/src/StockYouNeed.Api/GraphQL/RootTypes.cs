@@ -157,6 +157,11 @@ public sealed class Query
         CancellationToken ct)
         => await sectorScope.GetSnapshotAsync(ct);
 
+    public async Task<IReadOnlyList<SpikeScanRow>> SpikeScan(
+        [Service] SpikeScanService spikeScan,
+        CancellationToken ct)
+        => await spikeScan.GetLatestAsync(ct);
+
     public async Task<Application.IndexOptions.NiftyOptionChainSnapshot> NiftyOptionChain(
         [Service] IInstrumentRepository instruments,
         [Service] IMarketDataRepository market,
@@ -335,7 +340,7 @@ public sealed class Query
     {
         if (string.IsNullOrWhiteSpace(strategy)) return null;
         var s = strategy.Trim().ToLowerInvariant();
-        return s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout" or "momentum_v2" or "momentum_v3" or "options_intraday" or "nifty_orb" or "nifty_orb_liq_v2" or "nifty_liq_breakout" or "nifty_breakout_volume" or "nifty_hero_zero" or "nifty_breakout_chain" ? s : null;
+        return s is "signals" or "liquidity" or "liquidity_fresh" or "liquidity_v2" or "confluence" or "trade_score" or "breakout" or "momentum_v2" or "momentum_v3" or "options_intraday" or "nifty_orb" or "nifty_orb_liq_v2" or "nifty_liq_breakout" or "nifty_breakout_volume" or "nifty_hero_zero" or "nifty_breakout_chain" or "nifty_momentum_v2" ? s : null;
     }
 
     private static string? NormalizeOutcomeResult(string? result)
@@ -402,6 +407,20 @@ public sealed class Mutation
             ruleset ?? "classic",
             requireRetest ?? false,
             requireRelativeStrength ?? false);
+
+    public async Task<IReadOnlyList<SpikeScanRow>> RunSpikeScan(
+        [Service] SpikeScanService spikeScan,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await spikeScan.RunAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
 
     public async Task<AnalysisRunRow> RunMomentumAnalysis(
         bool includeNifty50,

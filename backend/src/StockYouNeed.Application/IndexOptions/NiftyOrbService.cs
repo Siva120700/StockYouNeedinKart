@@ -4,13 +4,14 @@ using StockYouNeed.Application.Confluence;
 using StockYouNeed.Application.OptionsIntraday;
 using StockYouNeed.Application.Outcomes;
 using StockYouNeed.Application.Services;
+using StockYouNeed.Application.Signals;
 using StockYouNeed.Domain;
 
 namespace StockYouNeed.Application.IndexOptions;
 
 /// <summary>
 /// Nifty index options: ORB, ORB+Liquidity V2, Liquidity V2+Breakout, Breakout+Volume,
-/// Breakout+Chain, and Hero Zero.
+/// Breakout+Chain, Hero Zero, and Momentum V2 (breakout + score ≥ 4).
 /// Each directional section uses the same premium ticket (1 ITM CE/PE + Δ × Nifty levels).
 /// </summary>
 public sealed class NiftyOrbService
@@ -21,6 +22,7 @@ public sealed class NiftyOrbService
     public const string SourceBreakoutVolume = "nifty_breakout_volume";
     public const string SourceBreakoutChain = "nifty_breakout_chain";
     public const string SourceHeroZero = "nifty_hero_zero";
+    public const string SourceMomentumV2 = "nifty_momentum_v2";
     private const decimal MaxBidAskSpreadPct = 5m;
     /// <summary>Wider than equity confluence — index entries can sit ~0.5% apart.</summary>
     private const decimal ComboPriceTolerancePct = 0.005m;
@@ -150,6 +152,8 @@ public sealed class NiftyOrbService
                     runId, userId, nifty, niftyToken, asOf, spot, liqInputsEarly, ct);
                 await TryPersistBreakoutVolumeAsync(
                     runId, userId, nifty, asOf, spot, liqInputsEarly, ct);
+                await TryPersistMomentumV2Async(
+                    runId, userId, nifty, asOf, spot, liqInputsEarly, ct);
                 await TryPersistBreakoutChainAsync(
                     runId, userId, nifty, asOf, spot, liqInputsEarly, ct);
                 await TryPersistHeroZeroAsync(
@@ -185,12 +189,14 @@ public sealed class NiftyOrbService
                         runId, userId, nifty.Id, SourceOrb, spent.Side!, spot,
                         spent.High, spent.Low, spent.Range,
                         spent.Entry, spent.StopLoss, spent.TargetT1, spent.TargetT2, spent.TargetT3,
-                        spent.Reasons.ToList(), spent.SkipReason ?? "skipped", ct);
+                        spent.Reasons.ToList(), spent.SkipReason ?? "skipped", null, ct);
                 }
 
                 await TryPersistLiqBreakoutAsync(
                     runId, userId, nifty, niftyToken, asOf, spot, liqInputs, ct);
                 await TryPersistBreakoutVolumeAsync(
+                    runId, userId, nifty, asOf, spot, liqInputs, ct);
+                await TryPersistMomentumV2Async(
                     runId, userId, nifty, asOf, spot, liqInputs, ct);
                 await TryPersistBreakoutChainAsync(
                     runId, userId, nifty, asOf, spot, liqInputs, ct);
@@ -509,6 +515,92 @@ public sealed class NiftyOrbService
     }
 
     /// <summary>
+    /// Same gate as equity Momentum V2: Nifty 2d breakout (actionable) + composite score ≥ 4 → option ticket.
+    /// </summary>
+    private async Task TryPersistMomentumV2Async(
+        Guid runId, Guid userId, Instrument nifty,
+        DateOnly asOf, decimal spot,
+        (List<MarketIntradayBarRow> Bars1h, List<LiquidityAnalysisService.Ohlcv> Bars4h, List<MarketBarRow> Daily) inputs,
+        CancellationToken ct)
+    {
+        var daily = inputs.Daily;
+        if (daily.Count < 25)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceMomentumV2, SignalSides.Buy, spot,
+                0, 0, 0, spot, spot, null, null, null,
+                new List<string> { "Need Nifty daily bars for momentum V2" },
+                "Insufficient Nifty daily history", ct);
+            return;
+        }
+
+        var brk = BreakoutSignalEvaluator.Evaluate(
+            userId, runId, asOf, daily,
+            livePrice: spot > 0 ? spot : null,
+            actionableOnly: true,
+            projectPartialSessionVolume: true);
+
+        if (brk is null)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceMomentumV2, SignalSides.Buy, spot,
+                0, 0, 0, spot, spot, null, null, null,
+                new List<string> { "Momentum V2: no actionable Nifty breakout" },
+                "No Nifty breakout setup", ct);
+            return;
+        }
+
+        var score = MomentumScoreV2Evaluator.Score(
+            brk.Side, daily, niftyBarsNewestFirst: null, livePrice: spot > 0 ? spot : null,
+            new MomentumScoreV2Evaluator.IntradayContext
+            {
+                Bars1hNewestFirst = inputs.Bars1h.Count > 0 ? inputs.Bars1h : null,
+            });
+
+        if (score is not decimal s || s < MomentumRules.MinScoreV2)
+        {
+            var shown = score?.ToString("0.0") ?? "—";
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceMomentumV2, brk.Side, spot,
+                0, 0, 0, brk.EntryPrice, brk.InitialStopLoss,
+                brk.TargetT1, brk.TargetT2, brk.TargetT3,
+                new List<string>
+                {
+                    $"Nifty breakout {brk.Side} but momentum V2 {shown}/10 below Average (need ≥ {MomentumRules.MinScoreV2:0})",
+                },
+                "Momentum score below Average tier", ct);
+            return;
+        }
+
+        if (brk.TargetT1 is not decimal t1)
+        {
+            await PersistSourceSkip(
+                runId, userId, nifty.Id, SourceMomentumV2, brk.Side, spot,
+                0, 0, 0, brk.EntryPrice, brk.InitialStopLoss, null, null, null,
+                new List<string> { "Breakout targets already spent on live mark" },
+                "Breakout setup spent", ct);
+            return;
+        }
+
+        var tier = MomentumScoreV2Evaluator.TierLabel(s);
+        var confidence = (int)Math.Min(90, Math.Max(70, 65 + s * 2.5m));
+        var reasons = new List<string>
+        {
+            $"Nifty Momentum V2: breakout + score {s:0.0}/10 ({tier})",
+            $"Breakout {brk.Side} entry {brk.EntryPrice:0.00} · SL {brk.InitialStopLoss:0.00} · T1 {t1:0.00}",
+            "Same rules as equity Momentum V2 (Average tier and above)",
+            "Option ticket via Δ × Nifty levels (1 ITM primary + ATM alt)",
+            "Option buying only — flat by 14:30 IST",
+        };
+
+        await TryBuildAndPersistTicketAsync(
+            runId, userId, nifty.Id, SourceMomentumV2, brk.Side, spot,
+            0, 0, 0,
+            brk.EntryPrice, brk.InitialStopLoss, t1, brk.TargetT2 ?? 0, brk.TargetT3 ?? 0,
+            reasons, confidence, ct);
+    }
+
+    /// <summary>
     /// Pattern breakout + volume, then option-chain OI gate (PCR / put-call walls).
     /// Only recommends when chain agrees with breakout side → strike + premium ticket.
     /// </summary>
@@ -699,18 +791,23 @@ public sealed class NiftyOrbService
 
         if (!HeroZeroStrikeSelector.PremiumInBand(quote.Ltp.Value))
         {
+            var hzPreview = new OptionTicketPreview(
+                expiryLabel, candidate, null, quote.Ltp.Value, null,
+                SpreadPct(quote.Bid, quote.Ask));
             await PersistSourceSkip(
                 runId, userId, nifty.Id, SourceHeroZero, setup.Side, spot,
                 0, 0, 0, setup.NiftyEntry, setup.NiftySl, setup.NiftyT1, null, null,
                 setup.CatalystLabels,
                 $"Premium ₹{quote.Ltp:0.00} outside Hero Zero band ₹{HeroZeroStrikeSelector.MinPremium:0}–₹{HeroZeroStrikeSelector.MaxPremium:0}",
-                ct);
+                hzPreview, ct);
             return;
         }
 
         var spreadPct = SpreadPct(quote.Bid, quote.Ask);
         if (spreadPct is null || spreadPct > 8m)
         {
+            var hzPreview = new OptionTicketPreview(
+                expiryLabel, candidate, null, quote.Ltp.Value, null, spreadPct);
             await PersistSourceSkip(
                 runId, userId, nifty.Id, SourceHeroZero, setup.Side, spot,
                 0, 0, 0, setup.NiftyEntry, setup.NiftySl, setup.NiftyT1, null, null,
@@ -718,7 +815,7 @@ public sealed class NiftyOrbService
                 spreadPct is null
                     ? "Far OTM bid/ask depth unavailable"
                     : $"Bid/ask spread {spreadPct:0.00}% exceeds 8% (OTM)",
-                ct);
+                hzPreview, ct);
             return;
         }
 
@@ -1095,78 +1192,33 @@ public sealed class NiftyOrbService
         decimal entry, decimal sl, decimal t1, decimal t2, decimal t3,
         List<string> baseReasons, int confidence, CancellationToken ct)
     {
-        var nfo = await _nfo.GetNfoForUnderlyingAsync(instrumentId, ct);
-        var options = nfo.Where(c => c.Kind == "option").ToList();
-        if (options.Count == 0)
+        var (preview, blockReason) = await TryResolveOptionPreviewAsync(
+            instrumentId, side, spot, requireTradeableSpread: true, ct);
+        if (blockReason is not null)
         {
-            await PersistSkipTicket(runId, userId, instrumentId, source, side, spot,
+            await PersistSkipTicket(
+                runId, userId, instrumentId, source, side, spot,
                 orbHigh, orbLow, orbRange, entry, sl, t1, t2, t3, baseReasons,
-                "No Nifty OPTIDX contracts mapped", ct);
+                blockReason, preview, ct);
             return false;
         }
 
-        var nearestExpiry = options.Min(o => o.Expiry);
-        var expiryContracts = options.Where(o => o.Expiry == nearestExpiry).ToList();
-        var expiryLabel = expiryContracts[0].ExpiryLabel;
-        var angelName = expiryContracts[0].AngelName;
-
-        var greeks = await _angel.GetOptionGreeksAsync(angelName, expiryLabel, ct);
-        if (greeks.Count == 0)
-        {
-            await PersistSkipTicket(runId, userId, instrumentId, source, side, spot,
-                orbHigh, orbLow, orbRange, entry, sl, t1, t2, t3, baseReasons,
-                $"optionGreek unavailable ({angelName} {expiryLabel})", ct);
-            return false;
-        }
-
-        var (primary, alt) = OptionStrikeSelector.SelectPreferItm(
-            side, spot, greeks, expiryContracts, expiryLabel);
-        if (primary is null || primary.Contract?.SymbolToken is null)
-        {
-            await PersistSkipTicket(runId, userId, instrumentId, source, side, spot,
-                orbHigh, orbLow, orbRange, entry, sl, t1, t2, t3, baseReasons,
-                $"No liquid 1ITM/ATM with Δ {OptionStrikeSelector.MinLongDelta:0.00}–{OptionStrikeSelector.MaxLongDelta:0.00}",
-                ct);
-            return false;
-        }
-
-        var pQuote = await QuoteNfoAsync(primary.Contract.SymbolToken, ct);
-        if (pQuote.Ltp is null or <= 0)
-        {
-            await PersistSkipTicket(runId, userId, instrumentId, source, side, spot,
-                orbHigh, orbLow, orbRange, entry, sl, t1, t2, t3, baseReasons,
-                "Option premium quote unavailable", ct);
-            return false;
-        }
-
-        var spreadPct = SpreadPct(pQuote.Bid, pQuote.Ask);
-        if (spreadPct is null || spreadPct > MaxBidAskSpreadPct)
-        {
-            await PersistSkipTicket(runId, userId, instrumentId, source, side, spot,
-                orbHigh, orbLow, orbRange, entry, sl, t1, t2, t3, baseReasons,
-                spreadPct is null
-                    ? "Bid/ask depth unavailable"
-                    : $"Bid/ask spread {spreadPct:0.00}% exceeds {MaxBidAskSpreadPct:0.00}%",
-                ct);
-            return false;
-        }
-
-        decimal? altPrem = null;
-        if (alt?.Contract?.SymbolToken is string altTok)
-            altPrem = (await QuoteNfoAsync(altTok, ct)).Ltp;
-
+        var primary = preview!.Primary;
+        var alt = preview.Alt;
         var longDelta = OptionStrikeSelector.ToLongOptionDelta(primary.Delta) ?? 0.5m;
         var premLevels = EstimatePremiumLevels(
-            pQuote.Ltp.Value, longDelta, entry, sl, t1, t2, t3);
+            preview.PremiumLtp, longDelta, entry, sl, t1, t2, t3);
 
         var reasons = baseReasons
             .Concat(new[]
             {
                 $"Primary 1 ITM {primary.Strike:0.##} {primary.OptionType}",
                 alt is not null ? $"Alt ATM {alt.Strike:0.##} {alt.OptionType}" : "No ATM alternate",
-                $"Δ {longDelta:0.00} · IV {primary.Iv:0.0}%",
-                $"Option entry ₹{pQuote.Ltp:0.00} · SL ₹{premLevels.Sl:0.00} · T1 ₹{premLevels.T1:0.00}",
-                $"Bid/ask {spreadPct:0.00}%",
+                primary.Iv is not null
+                    ? $"Δ {longDelta:0.00} · IV {primary.Iv:0.0}%"
+                    : $"Δ {longDelta:0.00} (estimated)",
+                $"Option entry ₹{preview.PremiumLtp:0.00} · SL ₹{premLevels.Sl:0.00} · T1 ₹{premLevels.T1:0.00}",
+                preview.SpreadPct is not null ? $"Bid/ask {preview.SpreadPct:0.00}%" : "Bid/ask n/a",
                 "Option buying only — flat by 14:30 IST",
             })
             .ToArray();
@@ -1193,31 +1245,9 @@ public sealed class NiftyOrbService
             UnderlyingTargetT3 = t3,
             ConfidenceScore = confidence,
             Reasons = reasons,
-            ContractTradingSymbol = primary.Contract.TradingSymbol,
-            ContractExpiryLabel = expiryLabel,
-            ContractStrike = primary.Strike,
-            ContractOptionType = primary.OptionType,
-            ContractToken = primary.Contract.SymbolToken,
-            ContractLotSize = primary.Contract.LotSize,
-            PremiumLtp = pQuote.Ltp,
-            PremiumStopLoss = premLevels.Sl,
-            PremiumTargetT1 = premLevels.T1,
-            PremiumTargetT2 = premLevels.T2,
-            PremiumTargetT3 = premLevels.T3,
-            Delta = longDelta,
-            Gamma = primary.Gamma,
-            Theta = primary.Theta,
-            Vega = primary.Vega,
-            ImpliedVolatility = primary.Iv,
-            TradeVolume = primary.Volume,
-            AltTradingSymbol = alt?.Contract?.TradingSymbol
-                ?? (alt is null ? null : $"NIFTY {alt.Strike:0.##} {alt.OptionType}"),
-            AltStrike = alt?.Strike,
-            AltDelta = OptionStrikeSelector.ToLongOptionDelta(alt?.Delta),
-            AltImpliedVolatility = alt?.Iv,
-            AltPremiumLtp = altPrem,
             FlatByIst = "14:30",
         };
+        ApplyPreviewToRow(row, preview, entry, sl, t1, t2, t3);
 
         await _repo.InsertRecommendationAsync(row, ct);
         await _outcomes.OpenAsync(new SignalOutcomeRow
@@ -1340,7 +1370,7 @@ public sealed class NiftyOrbService
             orb.Entry > 0 ? orb.Entry : spot,
             orb.StopLoss > 0 ? orb.StopLoss : spot,
             orb.TargetT1, orb.TargetT2, orb.TargetT3,
-            orb.Reasons.ToList(), reason, ct);
+            orb.Reasons.ToList(), reason, null, ct);
     }
 
     private Task PersistSourceSkip(
@@ -1350,15 +1380,24 @@ public sealed class NiftyOrbService
         List<string> baseReasons, string reason, CancellationToken ct)
         => PersistSkipTicket(
             runId, userId, instrumentId, source, side, spot,
-            orbHigh, orbLow, orbRange, entry, sl, t1, t2, t3, baseReasons, reason, ct);
+            orbHigh, orbLow, orbRange, entry, sl, t1, t2, t3, baseReasons, reason, null, ct);
+
+    private Task PersistSourceSkip(
+        Guid runId, Guid userId, Guid instrumentId, string source, string side, decimal spot,
+        decimal orbHigh, decimal orbLow, decimal orbRange,
+        decimal entry, decimal sl, decimal? t1, decimal? t2, decimal? t3,
+        List<string> baseReasons, string reason, OptionTicketPreview? preview, CancellationToken ct)
+        => PersistSkipTicket(
+            runId, userId, instrumentId, source, side, spot,
+            orbHigh, orbLow, orbRange, entry, sl, t1, t2, t3, baseReasons, reason, preview, ct);
 
     private async Task PersistSkipTicket(
         Guid runId, Guid userId, Guid instrumentId, string source, string side, decimal spot,
         decimal orbHigh, decimal orbLow, decimal orbRange,
         decimal entry, decimal sl, decimal? t1, decimal? t2, decimal? t3,
-        List<string> baseReasons, string reason, CancellationToken ct)
+        List<string> baseReasons, string reason, OptionTicketPreview? preview, CancellationToken ct)
     {
-        await _repo.InsertRecommendationAsync(new NiftyOrbRecommendationRow
+        var row = new NiftyOrbRecommendationRow
         {
             Id = Guid.NewGuid(),
             RunId = runId,
@@ -1382,7 +1421,206 @@ public sealed class NiftyOrbService
             ConfidenceScore = 0,
             Reasons = baseReasons.Append(reason).ToArray(),
             FlatByIst = "14:30",
-        }, ct);
+        };
+
+        preview ??= t1 is > 0 && entry > 0 && sl > 0 && source != SourceHeroZero
+            ? (await TryResolveOptionPreviewAsync(
+                instrumentId, side, spot, requireTradeableSpread: false, ct)).Preview
+            : null;
+
+        if (preview is not null)
+        {
+            if (source == SourceHeroZero)
+                ApplyHeroZeroPreviewToRow(row, preview);
+            else
+                ApplyPreviewToRow(row, preview, entry, sl, t1, t2, t3);
+        }
+
+        await _repo.InsertRecommendationAsync(row, ct);
+    }
+
+    private sealed record OptionTicketPreview(
+        string ExpiryLabel,
+        OptionStrikeSelector.Candidate Primary,
+        OptionStrikeSelector.Candidate? Alt,
+        decimal PremiumLtp,
+        decimal? AltPremiumLtp,
+        decimal? SpreadPct);
+
+    private async Task<(OptionTicketPreview? Preview, string? BlockReason)> TryResolveOptionPreviewAsync(
+        Guid instrumentId, string side, decimal spot, bool requireTradeableSpread, CancellationToken ct)
+    {
+        var nfo = await _nfo.GetNfoForUnderlyingAsync(instrumentId, ct);
+        var options = nfo.Where(c => c.Kind == "option").ToList();
+        if (options.Count == 0)
+            return (null, "No Nifty OPTIDX contracts mapped");
+
+        var nearestExpiry = options.Min(o => o.Expiry);
+        var expiryContracts = options.Where(o => o.Expiry == nearestExpiry).ToList();
+        var expiryLabel = expiryContracts[0].ExpiryLabel;
+        var angelName = expiryContracts[0].AngelName;
+        var refSpot = spot > 0 ? spot : (expiryContracts[0].Strike ?? 0m);
+
+        var greeks = await _angel.GetOptionGreeksAsync(angelName, expiryLabel, ct);
+        OptionStrikeSelector.Candidate? primary = null;
+        OptionStrikeSelector.Candidate? alt = null;
+        if (greeks.Count > 0)
+        {
+            (primary, alt) = OptionStrikeSelector.SelectPreferItm(
+                side, refSpot, greeks, expiryContracts, expiryLabel);
+        }
+
+        if (primary is null || primary.Contract?.SymbolToken is null)
+        {
+            var fallback = PickDisplayStrikeFromContracts(side, refSpot, expiryContracts, expiryLabel);
+            if (fallback?.SymbolToken is null)
+            {
+                var reason = greeks.Count == 0
+                    ? $"optionGreek unavailable ({angelName} {expiryLabel})"
+                    : $"No liquid 1ITM/ATM with Δ {OptionStrikeSelector.MinLongDelta:0.00}–{OptionStrikeSelector.MaxLongDelta:0.00}";
+                return (null, reason);
+            }
+
+            primary = new OptionStrikeSelector.Candidate(
+                fallback.Strike ?? 0m, fallback.OptionType ?? OptTypeFromSide(side), 0.5m,
+                null, null, null, null, null, 0, fallback);
+        }
+
+        var pQuote = await QuoteNfoAsync(primary.Contract!.SymbolToken!, ct);
+        if (pQuote.Ltp is null or <= 0)
+            return (null, "Option premium quote unavailable");
+
+        decimal? altPrem = null;
+        if (alt?.Contract?.SymbolToken is string altTok)
+            altPrem = (await QuoteNfoAsync(altTok, ct)).Ltp;
+
+        var spreadPct = SpreadPct(pQuote.Bid, pQuote.Ask);
+        var preview = new OptionTicketPreview(
+            expiryLabel, primary, alt, pQuote.Ltp.Value, altPrem, spreadPct);
+
+        if (requireTradeableSpread && (spreadPct is null || spreadPct > MaxBidAskSpreadPct))
+        {
+            var reason = spreadPct is null
+                ? "Bid/ask depth unavailable"
+                : $"Bid/ask spread {spreadPct:0.00}% exceeds {MaxBidAskSpreadPct:0.00}%";
+            return (preview, reason);
+        }
+
+        return (preview, null);
+    }
+
+    private static string OptTypeFromSide(string side)
+        => side.Equals(SignalSides.Sell, StringComparison.OrdinalIgnoreCase) ? "PE" : "CE";
+
+    private static NfoContractRow? PickDisplayStrikeFromContracts(
+        string side, decimal spot, IReadOnlyList<NfoContractRow> expiryContracts, string expiryLabel)
+    {
+        var optType = side.Equals(SignalSides.Sell, StringComparison.OrdinalIgnoreCase) ? "PE" : "CE";
+        var chain = expiryContracts
+            .Where(c => c.Kind == "option"
+                && c.OptionType == optType
+                && c.ExpiryLabel.Equals(expiryLabel, StringComparison.OrdinalIgnoreCase)
+                && c.Strike > 0)
+            .ToList();
+        if (chain.Count == 0)
+            return null;
+
+        var strikes = chain
+            .Where(c => c.Strike is > 0)
+            .Select(c => c.Strike!.Value)
+            .Distinct()
+            .OrderBy(s => s)
+            .ToList();
+        var atm = strikes.OrderBy(s => Math.Abs(s - spot)).First();
+        if (spot > 0 && Math.Abs(atm - spot) / spot > 0.06m)
+            return null;
+
+        var step = InferNiftyStrikeStep(strikes, atm);
+        var itmStrike = optType == "CE" ? atm - step : atm + step;
+        if (!strikes.Contains(itmStrike))
+        {
+            itmStrike = optType == "CE"
+                ? strikes.Where(s => s < atm).DefaultIfEmpty(atm).Max()
+                : strikes.Where(s => s > atm).DefaultIfEmpty(atm).Min();
+        }
+
+        return chain.FirstOrDefault(c => c.Strike == itmStrike)
+            ?? chain.FirstOrDefault(c => c.Strike == atm);
+    }
+
+    private static decimal InferNiftyStrikeStep(IReadOnlyList<decimal> strikes, decimal atm)
+    {
+        if (strikes.Count < 2)
+            return 50m;
+        var diffs = strikes.Zip(strikes.Skip(1), (a, b) => Math.Abs(b - a)).Where(d => d > 0).ToList();
+        return diffs.Count == 0
+            ? 50m
+            : diffs.GroupBy(d => d).OrderByDescending(g => g.Count()).First().Key;
+    }
+
+    private static void ApplyPreviewToRow(
+        NiftyOrbRecommendationRow row,
+        OptionTicketPreview preview,
+        decimal entry, decimal sl, decimal? t1, decimal? t2, decimal? t3)
+    {
+        var primary = preview.Primary;
+        var longDelta = OptionStrikeSelector.ToLongOptionDelta(primary.Delta) ?? 0.5m;
+        var t1v = t1 ?? 0m;
+        var t2v = t2 ?? 0m;
+        var t3v = t3 ?? 0m;
+        var premLevels = EstimatePremiumLevels(
+            preview.PremiumLtp, longDelta, entry, sl, t1v, t2v, t3v);
+
+        row.ContractTradingSymbol = primary.Contract?.TradingSymbol;
+        row.ContractExpiryLabel = preview.ExpiryLabel;
+        row.ContractStrike = primary.Strike;
+        row.ContractOptionType = primary.OptionType;
+        row.ContractToken = primary.Contract?.SymbolToken;
+        row.ContractLotSize = primary.Contract?.LotSize;
+        row.PremiumLtp = preview.PremiumLtp;
+        row.PremiumStopLoss = premLevels.Sl;
+        row.PremiumTargetT1 = t1 is > 0 ? premLevels.T1 : null;
+        row.PremiumTargetT2 = t2 is > 0 ? premLevels.T2 : null;
+        row.PremiumTargetT3 = t3 is > 0 ? premLevels.T3 : null;
+        row.Delta = longDelta;
+        row.Gamma = primary.Gamma;
+        row.Theta = primary.Theta;
+        row.Vega = primary.Vega;
+        row.ImpliedVolatility = primary.Iv;
+        row.TradeVolume = primary.Volume;
+
+        var alt = preview.Alt;
+        row.AltTradingSymbol = alt?.Contract?.TradingSymbol
+            ?? (alt is null ? null : $"NIFTY {alt.Strike:0.##} {alt.OptionType}");
+        row.AltStrike = alt?.Strike;
+        row.AltDelta = OptionStrikeSelector.ToLongOptionDelta(alt?.Delta);
+        row.AltImpliedVolatility = alt?.Iv;
+        row.AltPremiumLtp = preview.AltPremiumLtp;
+    }
+
+    private static void ApplyHeroZeroPreviewToRow(NiftyOrbRecommendationRow row, OptionTicketPreview preview)
+    {
+        var candidate = preview.Primary;
+        var ticket = NiftyHeroZeroEvaluator.BuildPremiumTicket(preview.PremiumLtp);
+        var longDelta = OptionStrikeSelector.ToLongOptionDelta(candidate.Delta) ?? candidate.Delta ?? 0.1m;
+
+        row.ContractTradingSymbol = candidate.Contract?.TradingSymbol;
+        row.ContractExpiryLabel = preview.ExpiryLabel;
+        row.ContractStrike = candidate.Strike;
+        row.ContractOptionType = candidate.OptionType;
+        row.ContractToken = candidate.Contract?.SymbolToken;
+        row.ContractLotSize = candidate.Contract?.LotSize;
+        row.PremiumLtp = preview.PremiumLtp;
+        row.PremiumStopLoss = ticket.StopLoss;
+        row.PremiumTargetT1 = ticket.TargetT1;
+        row.PremiumTargetT2 = ticket.TargetT2;
+        row.PremiumTargetT3 = ticket.TargetT3;
+        row.Delta = longDelta;
+        row.Gamma = candidate.Gamma;
+        row.Theta = candidate.Theta;
+        row.Vega = candidate.Vega;
+        row.ImpliedVolatility = candidate.Iv;
+        row.TradeVolume = candidate.Volume;
     }
 
     private static NiftyOrbRunRow Ok(Guid runId, Guid userId, DateOnly asOf) => new()

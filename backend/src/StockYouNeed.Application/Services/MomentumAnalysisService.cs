@@ -15,7 +15,7 @@ namespace StockYouNeed.Application.Services;
 public sealed class MomentumAnalysisService
 {
     /// <summary>V2 stores Average tier and above only (score ≥ 4 /10 — 🟡🟢🔥).</summary>
-    public const decimal MinMomentumScoreV2 = 4m;
+    public const decimal MinMomentumScoreV2 = MomentumRules.MinScoreV2;
     /// <summary>V3 ranks all scored breakouts — same as V2 (tier labels filter visually).</summary>
     public const decimal MinMomentumScoreV3 = 0m;
 

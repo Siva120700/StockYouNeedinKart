@@ -39,6 +39,18 @@ import { formatMomentumScore, MIN_MOMENTUM_AVERAGE_SCORE, momentumTierLabel } fr
 export type MomentumRuleset = "v2" | "v3";
 type MomentumTab = "active" | "history" | "traded";
 
+function meetsMomentumV2Floor(row: MomentumSignal, ruleset: MomentumRuleset): boolean {
+  return ruleset !== "v2" || row.momentumScore >= MIN_MOMENTUM_AVERAGE_SCORE;
+}
+
+function filterMomentumV2Floor<T extends MomentumSignal>(
+  list: T[],
+  ruleset: MomentumRuleset,
+): T[] {
+  if (ruleset !== "v2") return list;
+  return list.filter((r) => meetsMomentumV2Floor(r, ruleset));
+}
+
 function formatTarget(row: MomentumSignal, target: number | null | undefined) {
   if (target == null || !Number.isFinite(Number(target)) || !row.entryPrice) return "";
   const t = Number(target);
@@ -128,7 +140,10 @@ export default function MomentumSignalsPage({
     try {
       const list = await DataFactory.momentumSignals(undefined, ruleset);
       setRows(list);
-      const synced = syncSignalDayHistory(historyScope, list);
+      const synced = syncSignalDayHistory(
+        historyScope,
+        filterMomentumV2Floor(list, ruleset),
+      );
       setHistoryRows(synced.history);
       setTradedRows(synced.traded);
       setFuturesCache({});
@@ -178,22 +193,32 @@ export default function MomentumSignalsPage({
     if (selected.length === 0) return;
     unmarkSignalDayTraded(historyScope, selected);
     setSelectedTradedIds([]);
-    const synced = syncSignalDayHistory(historyScope, rows);
+    const synced = syncSignalDayHistory(
+      historyScope,
+      filterMomentumV2Floor(rows, ruleset),
+    );
     setHistoryRows(synced.history);
     setTradedRows(synced.traded);
     setInfo(`Removed ${selected.length} from Traded.`);
   }
 
   const filteredActive = useMemo(() => {
-    let list = rows;
-    if (ruleset === "v2") {
-      list = list.filter((r) => r.momentumScore >= MIN_MOMENTUM_AVERAGE_SCORE);
-    }
+    let list = filterMomentumV2Floor(rows, ruleset);
     if (sectorCheck) list = list.filter((r) => r.sectorConfirmed);
     if (freshCrossCheck) list = list.filter((r) => r.freshCross);
     if (hideLaggingRs) list = list.filter((r) => !r.sectorRs?.downranked);
     return [...list].sort((a, b) => b.momentumScore - a.momentumScore);
   }, [rows, ruleset, sectorCheck, freshCrossCheck, hideLaggingRs]);
+
+  const filteredHistory = useMemo(
+    () => filterMomentumV2Floor(historyRows, ruleset),
+    [historyRows, ruleset],
+  );
+
+  const filteredTraded = useMemo(
+    () => filterMomentumV2Floor(tradedRows, ruleset),
+    [tradedRows, ruleset],
+  );
 
   const loadFutures = useCallback(async (row: MomentumSignal) => {
     setFuturesLoadingId(row.id);
@@ -219,10 +244,10 @@ export default function MomentumSignalsPage({
   );
 
   const tableRows: MomentumSignal[] = useMemo(() => {
-    if (tab === "history") return historyRows;
-    if (tab === "traded") return tradedRows;
+    if (tab === "history") return filteredHistory;
+    if (tab === "traded") return filteredTraded;
     return filteredActive;
-  }, [tab, filteredActive, historyRows, tradedRows]);
+  }, [tab, filteredActive, filteredHistory, filteredTraded]);
 
   useEffect(() => {
     setTitle(pageTitle);
@@ -479,8 +504,8 @@ export default function MomentumSignalsPage({
       </Alert>
       <Tabs value={tab} onChange={(_, v) => setTab(v as MomentumTab)}>
         <Tab value="active" label={`Active (${filteredActive.length})`} />
-        <Tab value="history" label={`History (${historyRows.length})`} />
-        <Tab value="traded" label={`Traded (${tradedRows.length})`} />
+        <Tab value="history" label={`History (${filteredHistory.length})`} />
+        <Tab value="traded" label={`Traded (${filteredTraded.length})`} />
       </Tabs>
       {tab === "traded" ? (
         <TradedDeleteBar

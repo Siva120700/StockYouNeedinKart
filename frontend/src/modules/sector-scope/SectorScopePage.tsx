@@ -1,12 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Box, Stack, Typography } from "@mui/material";
+import {
+  Alert,
+  Box,
+  Paper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Typography,
+} from "@mui/material";
+import { CaretDown, CaretUp } from "@phosphor-icons/react";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
 import PageFrame from "../../zen_components/layout/PageFrame";
 import { SectorScopeApi, type SectorScopeSector, type SectorScopeStock } from "./api";
 
-const FLAT_HIDE = 0.05;
-/** ± this % hits full red / full green (StepOne-style). */
 const COLOR_CAP_PCT = 3;
+/** Biggest |%| movers shown in the heatmap (up or down). */
+const HEATMAP_TOP_N = 5;
 
 const EXTREME_RED = { r: 211, g: 0, b: 0 };
 const MID_WHITE = { r: 255, g: 255, b: 255 };
@@ -125,6 +137,45 @@ function SectorBarChart({ sectors }: { sectors: SectorScopeSector[] }) {
   );
 }
 
+function uniqueStocks(stocks: SectorScopeStock[] | null | undefined): SectorScopeStock[] {
+  const seenId = new Set<string>();
+  const seenSym = new Set<string>();
+  const out: SectorScopeStock[] = [];
+  for (const st of stocks ?? []) {
+    const id = (st.instrumentId ?? "").toLowerCase();
+    const sym = (st.appSymbol ?? "").toUpperCase();
+    if (id && seenId.has(id)) continue;
+    if (sym && seenSym.has(sym)) continue;
+    if (id) seenId.add(id);
+    if (sym) seenSym.add(sym);
+    out.push(st);
+  }
+  return out;
+}
+
+function splitHeatmapAndTiles(sectors: SectorScopeSector[]) {
+  const heatmapSectors = sectors
+    .map((s) => ({
+      ...s,
+      stocks: uniqueStocks(s.stocks)
+        .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct))
+        .slice(0, HEATMAP_TOP_N),
+    }))
+    .filter((s) => s.stocks.length > 0);
+
+  const tileSectors = sectors
+    .map((s) => ({
+      ...s,
+      stocks: uniqueStocks(s.stocks).sort(
+        (a, b) => Math.abs(b.changePct) - Math.abs(a.changePct),
+      ),
+    }))
+    .filter((s) => s.stocks.length > 0)
+    .sort((a, b) => Math.abs(b.medianChangePct) - Math.abs(a.medianChangePct));
+
+  return { heatmapSectors, tileSectors };
+}
+
 function StockCell({ stock }: { stock: SectorScopeStock }) {
   const abs = Math.abs(stock.changePct);
   const flex = Math.max(1, Math.min(8, abs / 0.4));
@@ -154,22 +205,16 @@ function StockCell({ stock }: { stock: SectorScopeStock }) {
 }
 
 function SectorTreemap({ sectors }: { sectors: SectorScopeSector[] }) {
-  const blocks = sectors
-    .map((s) => ({
-      ...s,
-      visible: s.stocks.filter((st) => Math.abs(st.changePct) >= FLAT_HIDE),
-    }))
-    .filter((s) => s.visible.length > 0);
-
+  const blocks = sectors.filter((s) => s.stocks.length > 0);
   const maxMove = Math.max(
     1,
-    ...blocks.map((s) => s.visible.reduce((a, st) => a + Math.abs(st.changePct), 0)),
+    ...blocks.map((s) => s.stocks.reduce((a, st) => a + Math.abs(st.changePct), 0)),
   );
 
   return (
     <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "stretch" }}>
       {blocks.map((s) => {
-        const weight = s.visible.reduce((a, st) => a + Math.abs(st.changePct), 0);
+        const weight = s.stocks.reduce((a, st) => a + Math.abs(st.changePct), 0);
         const flex = Math.max(1.2, (weight / maxMove) * 8);
         return (
           <Box
@@ -196,7 +241,7 @@ function SectorTreemap({ sectors }: { sectors: SectorScopeSector[] }) {
               }}
             >
               <Typography variant="caption" fontWeight={700}>
-                {s.displayName} {s.visible.length}
+                {s.displayName} {s.stocks.length}
               </Typography>
               <Typography
                 variant="caption"
@@ -210,14 +255,126 @@ function SectorTreemap({ sectors }: { sectors: SectorScopeSector[] }) {
               </Typography>
             </Box>
             <Box sx={{ display: "flex", flexWrap: "wrap", flex: 1 }}>
-              {s.visible.map((st) => (
-                <StockCell key={st.instrumentId} stock={st} />
+              {uniqueStocks(s.stocks).map((st) => (
+                <StockCell key={`${st.instrumentId}:${st.appSymbol}`} stock={st} />
               ))}
             </Box>
           </Box>
         );
       })}
     </Box>
+  );
+}
+
+function fmtPrice(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  return Number(n).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function SectorListTile({ sector }: { sector: SectorScopeSector }) {
+  const up = sector.stocks.filter((s) => s.changePct > 0).length;
+  const down = sector.stocks.filter((s) => s.changePct < 0).length;
+  const total = sector.stocks.length;
+  const downPct = total > 0 ? (down / total) * 100 : 0;
+  const upPct = total > 0 ? (up / total) * 100 : 0;
+
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        border: "1px solid",
+        borderColor: "divider",
+        borderRadius: 2,
+        overflow: "hidden",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <Box sx={{ px: 1.5, pt: 1.25, pb: 1 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+          <Typography variant="subtitle2" fontWeight={700} noWrap title={sector.displayName}>
+            {sector.displayName}
+          </Typography>
+          <Stack direction="row" alignItems="center" spacing={1} flexShrink={0}>
+            <Stack direction="row" alignItems="center" spacing={0.25} sx={{ color: "success.main" }}>
+              <CaretUp size={14} weight="bold" />
+              <Typography variant="caption" fontWeight={600}>
+                {up}
+              </Typography>
+            </Stack>
+            <Stack direction="row" alignItems="center" spacing={0.25} sx={{ color: "error.main" }}>
+              <CaretDown size={14} weight="bold" />
+              <Typography variant="caption" fontWeight={600}>
+                {down}
+              </Typography>
+            </Stack>
+            <Typography variant="caption" color="text.secondary">
+              {total}
+            </Typography>
+          </Stack>
+        </Stack>
+        <Stack direction="row" alignItems="center" spacing={1} mt={0.75}>
+          <Typography variant="caption" color="error.main" sx={{ minWidth: 88, whiteSpace: "nowrap" }}>
+            {down} down ({downPct.toFixed(0)}%)
+          </Typography>
+          <Box
+            sx={{
+              flex: 1,
+              height: 6,
+              borderRadius: 1,
+              overflow: "hidden",
+              display: "flex",
+              bgcolor: "action.hover",
+            }}
+          >
+            <Box sx={{ width: `${downPct}%`, bgcolor: "error.main" }} />
+            <Box sx={{ width: `${upPct}%`, bgcolor: "success.main" }} />
+          </Box>
+          <Typography
+            variant="caption"
+            color="success.main"
+            sx={{ minWidth: 72, textAlign: "right", whiteSpace: "nowrap" }}
+          >
+            {up} up ({upPct.toFixed(0)}%)
+          </Typography>
+        </Stack>
+      </Box>
+      <Box sx={{ flex: 1, overflow: "auto", maxHeight: 320 }}>
+        <Table size="small" stickyHeader>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ fontWeight: 600, py: 0.5 }}>Symbol</TableCell>
+              <TableCell align="right" sx={{ fontWeight: 600, py: 0.5 }}>
+                Price
+              </TableCell>
+              <TableCell align="right" sx={{ fontWeight: 600, py: 0.5 }}>
+                %
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {uniqueStocks(sector.stocks).map((st) => (
+              <TableRow key={`${st.instrumentId}:${st.appSymbol}`} hover>
+                <TableCell sx={{ py: 0.6, fontWeight: 700 }}>{st.appSymbol}</TableCell>
+                <TableCell align="right" sx={{ py: 0.6 }}>
+                  {fmtPrice(st.ltp)}
+                </TableCell>
+                <TableCell
+                  align="right"
+                  sx={{ py: 0.6, fontWeight: 600, color: labelColor(st.changePct) }}
+                >
+                  {fmtPct(st.changePct)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Box>
+    </Paper>
   );
 }
 
@@ -234,7 +391,12 @@ export default function SectorScopePage() {
     setIsSyncing(true);
     try {
       const snap = await SectorScopeApi.fetch();
-      setSectors(snap.sectors);
+      setSectors(
+        (snap.sectors ?? []).map((s) => {
+          const stocks = uniqueStocks(s.stocks);
+          return { ...s, stocks, constituentCount: stocks.length };
+        }),
+      );
       setNiftyPct(snap.niftyChangePct);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -258,6 +420,11 @@ export default function SectorScopePage() {
 
   const leading = useMemo(
     () => sectors.filter((s) => !s.lagging).slice(0, 3).map((s) => s.displayName),
+    [sectors],
+  );
+
+  const { heatmapSectors, tileSectors } = useMemo(
+    () => splitHeatmapAndTiles(sectors),
     [sectors],
   );
 
@@ -293,10 +460,43 @@ export default function SectorScopePage() {
           Sector heatmap
         </Typography>
         <Typography variant="body2" color="text.secondary" mb={1}>
-          Color and size follow % change. Flat names (|Δ| &lt; 0.05%) are hidden.
+          Color and size follow % change. Each sector shows its top {HEATMAP_TOP_N} names by
+          absolute % move (up or down).
         </Typography>
         <ColorLegend />
-        <SectorTreemap sectors={sectors} />
+        {heatmapSectors.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            {loading ? "Loading…" : "No movers yet."}
+          </Typography>
+        ) : (
+          <SectorTreemap sectors={heatmapSectors} />
+        )}
+      </Box>
+
+      <Box>
+        <Typography variant="h6" gutterBottom>
+          Sector lists
+        </Typography>
+        <Typography variant="body2" color="text.secondary" mb={1}>
+          All names in each sector — symbol, price, and % change.
+        </Typography>
+        {tileSectors.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            {loading ? "Loading…" : "No sector names."}
+          </Typography>
+        ) : (
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+              gap: 2,
+            }}
+          >
+            {tileSectors.map((s) => (
+              <SectorListTile key={s.instrumentId} sector={s} />
+            ))}
+          </Box>
+        )}
       </Box>
     </PageFrame>
   );

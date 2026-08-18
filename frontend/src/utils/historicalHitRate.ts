@@ -18,6 +18,7 @@ export type ScreenerStrategy =
   | "nifty_liq_breakout"
   | "nifty_breakout_volume"
   | "nifty_breakout_chain"
+  | "nifty_momentum_v2"
   | "nifty_hero_zero";
 
 export type HitRateByInstrument = Map<string, number | null>;

@@ -31,3 +31,9 @@ public static class AnalysisTriggers
     public const string FirstOpenOfDay = "first_open_of_day";
     public const string ManualRun = "manual_run";
 }
+
+/// <summary>Momentum V2 store/display floor (Average tier and above).</summary>
+public static class MomentumRules
+{
+    public const decimal MinScoreV2 = 4m;
+}

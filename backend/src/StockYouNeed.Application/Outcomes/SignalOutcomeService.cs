@@ -281,6 +281,8 @@ public sealed class SignalOutcomeService
 
         foreach (var sig in await _portfolio.GetMomentumSignalsAsync(userId, null, "v2", ct))
         {
+            if (sig.MomentumScore < MomentumAnalysisService.MinMomentumScoreV2)
+                continue;
             await OpenFromMomentumAsync(sig, "v2", ct);
             opened++;
         }

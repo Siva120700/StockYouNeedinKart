@@ -14,6 +14,7 @@ import TradeScorePage from "./modules/trade-score/TradeScorePage";
 import BacktestPage from "./pages/BacktestPage";
 import LiquiditySignalsPage from "./pages/LiquiditySignalsPage";
 import MomentumSignalsPage from "./pages/MomentumSignalsPage";
+import SpikeScanPage from "./pages/SpikeScanPage";
 import LtpPage from "./pages/LtpPage";
 import PositionsPage from "./pages/PositionsPage";
 import SignalsPage from "./pages/SignalsPage";
@@ -50,6 +51,7 @@ export default function App() {
               <Route path="/liquidity-v2" element={<LiquiditySignalsPage ruleset="v2" />} />
               <Route path="/momentum-v2" element={<MomentumSignalsPage ruleset="v2" />} />
               <Route path="/momentum-v3" element={<MomentumSignalsPage ruleset="v3" />} />
+              <Route path="/spike-15m" element={<SpikeScanPage />} />
               <Route path="/confluence" element={<ConfluencePage />} />
               <Route path="/breakout" element={<BreakoutPage />} />
               <Route path="/trade-score" element={<TradeScorePage />} />

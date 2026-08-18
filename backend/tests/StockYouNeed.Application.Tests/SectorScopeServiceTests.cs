@@ -55,6 +55,29 @@ public class SectorScopeServiceTests
         Assert.Contains(it.Stocks, s => s.AppSymbol == "INFY");
     }
 
+    [Fact]
+    public void BuildSnapshot_DeduplicatesStocksByInstrumentId()
+    {
+        var itId = Guid.NewGuid();
+        var infy = Guid.NewGuid();
+
+        var quotes = new List<SectorScopeQuoteRow>
+        {
+            Index("NIFTYIT", "Nifty IT", itId, ltp: 35000, prev: 35000),
+            Equity("INFY", infy, itId, "NIFTYIT", "Nifty IT", ltp: 1400, prev: 1500),
+            Equity("INFY", infy, itId, "NIFTYIT", "Nifty IT", ltp: 1400, prev: 1500),
+            Equity("INFY", infy, itId, "NIFTYIT", "Nifty IT", ltp: 1400, prev: 1500),
+            Equity("TCS", Guid.NewGuid(), itId, "NIFTYIT", "Nifty IT", ltp: 3000, prev: 3100),
+        };
+
+        var snap = SectorScopeService.BuildSnapshot(quotes, DateTimeOffset.UtcNow);
+        var it = Assert.Single(snap.Sectors, s => s.Symbol == "NIFTYIT");
+
+        Assert.Equal(2, it.Stocks.Count);
+        Assert.Equal(2, it.ConstituentCount);
+        Assert.Single(it.Stocks, s => s.AppSymbol == "INFY");
+    }
+
     private static SectorScopeQuoteRow Index(string symbol, string name, Guid id, decimal ltp, decimal prev)
         => new()
         {

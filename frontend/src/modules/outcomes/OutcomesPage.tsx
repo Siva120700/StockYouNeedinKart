@@ -50,6 +50,7 @@ const ALL_OUTCOME_STRATEGIES = [
   "nifty_liq_breakout",
   "nifty_breakout_volume",
   "nifty_breakout_chain",
+  "nifty_momentum_v2",
   "nifty_hero_zero",
 ] as const;
 
@@ -507,11 +508,11 @@ export default function OutcomesPage() {
       )}
       <Alert severity="info">
         How this works: Accuracy tracks setups you already have. 1) Run Signals / Liquidity /
-        Breakout / Trade Score (or click Import live setups). 2) Rows appear as open. 3) Click
+        Breakout / Trade Score / Momentum (or click Import live setups). 2) Rows appear as open. 3) Click
         Resolve open (or wait for Worker) to mark target / SL / time-stop from future bars. Hit
-        rate = target ÷ (target + SL). Expand a strategy to sort/filter stocks; Days = exit date −
-        entry date. Sector check keeps only setups where the linked sector index also broke the prior
-        2 sessions (same rule as live screeners).
+        rate = target ÷ (target + SL). Momentum V2 counts only Average tier and above (score ≥ 4), same
+        as the Momentum V2 page. Expand a strategy to sort/filter stocks; Days = exit date − entry date.
+        Sector check keeps only setups where the linked sector index also broke the prior 2 sessions.
       </Alert>
       {totals.setups === 0 && !loading && (
         <Alert severity="warning">

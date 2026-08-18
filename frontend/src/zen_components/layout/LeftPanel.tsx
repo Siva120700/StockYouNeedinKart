@@ -20,6 +20,7 @@ import {
   Pulse,
   SidebarSimple,
   SquaresFour,
+  TrendUp,
 } from "@phosphor-icons/react";
 import { NavLink } from "react-router-dom";
 import { DEFAULT_ICON_SIZE } from "../../constants";
@@ -35,6 +36,7 @@ const navItems = [
   { to: "/liquidity-v2", label: "Liquidity V2", icon: Drop },
   { to: "/momentum-v2", label: "Momentum V2", icon: Lightning },
   { to: "/momentum-v3", label: "Momentum V3", icon: Lightning },
+  { to: "/spike-15m", label: "15m Spike", icon: TrendUp },
   { to: "/confluence", label: "Confluence", icon: ChartLine },
   { to: "/breakout", label: "Breakout", icon: ChartLine },
   { to: "/trade-score", label: "Trade Score", icon: ChartLine },

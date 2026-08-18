@@ -66,6 +66,8 @@ export function strategyLabel(strategy: string | null | undefined): string {
       return "Index Options (Breakout + Volume)";
     case "nifty_breakout_chain":
       return "Index Options (Breakout + Chain)";
+    case "nifty_momentum_v2":
+      return "Index Options (Momentum V2)";
     case "nifty_hero_zero":
       return "Index Options (Hero Zero)";
     default:

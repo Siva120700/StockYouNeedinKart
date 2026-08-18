@@ -118,6 +118,29 @@ public sealed class MarketIntradayBarRow
     public long Volume { get; set; }
 }
 
+public sealed class SpikeScanRow
+{
+    public Guid InstrumentId { get; set; }
+    public string AppSymbol { get; set; } = "";
+    public string Side { get; set; } = "buy";
+    public DateTimeOffset BarTime { get; set; }
+    public bool Forming { get; set; }
+    public decimal Open { get; set; }
+    public decimal High { get; set; }
+    public decimal Low { get; set; }
+    public decimal Close { get; set; }
+    public long Volume { get; set; }
+    public decimal ChangePct { get; set; }
+    public decimal RangePct { get; set; }
+    public decimal RelativeVolume { get; set; }
+    public decimal SpikeScore { get; set; }
+    public decimal EntryPrice { get; set; }
+    public decimal InitialStopLoss { get; set; }
+    public decimal? TargetT1 { get; set; }
+    public decimal? TargetT2 { get; set; }
+    public decimal? TargetT3 { get; set; }
+}
+
 public sealed class MarketOhlcRow
 {
     public Guid InstrumentId { get; set; }
