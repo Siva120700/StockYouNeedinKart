@@ -6,6 +6,7 @@ import type {
   LiquiditySignal,
   LtpQuote,
   MomentumSignal,
+  MomentumFuturesSuggestion,
   OpenPosition,
   Signal,
   UniverseInstrument,
@@ -88,6 +89,46 @@ export const DataFactory = {
       { runId: runId ?? null, ruleset },
     );
     return data.momentumSignals;
+  },
+
+  async momentumFuturesSuggestion(signal: MomentumSignal): Promise<MomentumFuturesSuggestion> {
+    const data = await gql<{ momentumFuturesSuggestion: MomentumFuturesSuggestion }>(
+      `query (
+        $instrumentId: UUID!
+        $side: String!
+        $entryPrice: Decimal!
+        $initialStopLoss: Decimal!
+        $targetT1: Decimal
+        $targetT2: Decimal
+        $targetT3: Decimal
+      ) {
+        momentumFuturesSuggestion(
+          instrumentId: $instrumentId
+          side: $side
+          entryPrice: $entryPrice
+          initialStopLoss: $initialStopLoss
+          targetT1: $targetT1
+          targetT2: $targetT2
+          targetT3: $targetT3
+        ) {
+          instrumentId side tradingSymbol expiryLabel symbolToken lotSize spotLtp
+          underlyingEntry underlyingStopLoss underlyingTargetT1 underlyingTargetT2 underlyingTargetT3
+          futuresEntry futuresExit futuresTargetT1 futuresTargetT2 futuresTargetT3
+          premiumPct buildUp futuresConflict skipReason
+          contractValue marginRequired expectedProfitT1 expectedProfitT2 expectedProfitT3 expectedStopLoss
+        }
+      }`,
+      {
+        instrumentId: signal.instrumentId,
+        side: signal.side,
+        entryPrice: signal.entryPrice,
+        initialStopLoss: signal.initialStopLoss,
+        targetT1: signal.targetT1 ?? null,
+        targetT2: signal.targetT2 ?? null,
+        targetT3: signal.targetT3 ?? null,
+      },
+    );
+    return data.momentumFuturesSuggestion;
   },
 
   async openPositions(): Promise<OpenPosition[]> {

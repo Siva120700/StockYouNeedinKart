@@ -24,6 +24,7 @@ import { ArrowsClockwise, CaretDown, DownloadSimple, Play } from "@phosphor-icon
 import { columnFactories } from "../../zen_components/table/columnFactories";
 import ZenTable from "../../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame, { ScrollPane } from "../../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { OutcomesApi } from "./api";
 import {
@@ -497,7 +498,7 @@ export default function OutcomesPage() {
   );
 
   return (
-    <Stack spacing={2} p={2}>
+    <PageFrame>
       {error && <Alert severity="error">{error}</Alert>}
       {info && (
         <Alert severity="success" onClose={() => setInfo(null)}>
@@ -518,6 +519,8 @@ export default function OutcomesPage() {
           then come back here and click Import live setups.
         </Alert>
       )}
+      <ScrollPane>
+      <Stack spacing={2}>
       <Stack direction="row" spacing={3} flexWrap="wrap">
         <Typography variant="body2">
           Setups: <b>{totals.setups}</b>
@@ -620,6 +623,8 @@ export default function OutcomesPage() {
         enableSearch
         searchPlaceholder="Filter outcomes…"
       />
-    </Stack>
+      </Stack>
+      </ScrollPane>
+    </PageFrame>
   );
 }

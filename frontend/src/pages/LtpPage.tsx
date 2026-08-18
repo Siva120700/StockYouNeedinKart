@@ -8,6 +8,7 @@ import ZenTable from "../zen_components/table/ZenTable";
 import {
   useZenPrimaryLayoutContext,
 } from "../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame, { TablePane } from "../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../constants";
 
 export default function LtpPage() {
@@ -133,26 +134,29 @@ export default function LtpPage() {
   );
 
   return (
-    <>
+    <PageFrame>
       {error ? (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error">
           {error}
         </Alert>
       ) : null}
       {info ? (
-        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo(null)}>
+        <Alert severity="success" onClose={() => setInfo(null)}>
           {info}
         </Alert>
       ) : null}
-      <ZenTable
-        columns={columns}
-        rows={rows}
-        getRowId={(r) => r.instrumentId}
-        loading={loading}
-        enableSearch
-        searchPlaceholder="Search symbol or name…"
-        emptyMessage="No symbols in universe — restart API to seed F&O."
-      />
-    </>
+      <TablePane>
+        <ZenTable
+          fillHeight
+          columns={columns}
+          rows={rows}
+          getRowId={(r) => r.instrumentId}
+          loading={loading}
+          enableSearch
+          searchPlaceholder="Search symbol or name…"
+          emptyMessage="No symbols in universe — restart API to seed F&O."
+        />
+      </TablePane>
+    </PageFrame>
   );
 }

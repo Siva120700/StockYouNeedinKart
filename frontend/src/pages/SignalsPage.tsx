@@ -15,6 +15,7 @@ import { columnFactories } from "../zen_components/table/columnFactories";
 import type { ColumnConfig } from "../zen_components/table/columnTypes";
 import ZenTable from "../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame, { TablePane } from "../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../constants";
 import {
   downloadExcelTable,
@@ -445,14 +446,14 @@ export default function SignalsPage() {
           : "No actionable signals (approaching entry, open T1). Click Run analysis.";
 
   return (
-    <>
+    <PageFrame>
       {error ? (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error">
           {error}
         </Alert>
       ) : null}
       {info ? (
-        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo(null)}>
+        <Alert severity="success" onClose={() => setInfo(null)}>
           {info}
         </Alert>
       ) : null}
@@ -462,7 +463,7 @@ export default function SignalsPage() {
           setTab(v);
           setSelectedTradedIds([]);
         }}
-        sx={{ mb: 1.5, minHeight: 40 }}
+        sx={{ minHeight: 40 }}
       >
         <Tab value="active" label={`Active (${filteredActive.length})`} />
         <Tab value="history" label={`History (${historyRows.length})`} />
@@ -474,18 +475,21 @@ export default function SignalsPage() {
           onDelete={onDeleteSelectedTraded}
         />
       ) : null}
-      <ZenTable
-        columns={columns}
-        rows={tableRows}
-        getRowId={(r) => (tab === "active" ? r.id : tradedRowId(r))}
-        loading={loading}
-        enableSearch
-        searchPlaceholder="Search symbol or name…"
-        emptyMessage={emptyMessage}
-        enableSelection={tab === "traded"}
-        selectedRowIds={tab === "traded" ? selectedTradedIds : undefined}
-        onSelectedRowIdsChange={tab === "traded" ? setSelectedTradedIds : undefined}
-      />
-    </>
+      <TablePane>
+        <ZenTable
+          fillHeight
+          columns={columns}
+          rows={tableRows}
+          getRowId={(r) => (tab === "active" ? r.id : tradedRowId(r))}
+          loading={loading}
+          enableSearch
+          searchPlaceholder="Search symbol or name…"
+          emptyMessage={emptyMessage}
+          enableSelection={tab === "traded"}
+          selectedRowIds={tab === "traded" ? selectedTradedIds : undefined}
+          onSelectedRowIdsChange={tab === "traded" ? setSelectedTradedIds : undefined}
+        />
+      </TablePane>
+    </PageFrame>
   );
 }

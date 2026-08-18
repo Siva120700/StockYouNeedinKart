@@ -69,49 +69,57 @@ public sealed class NfoSyncService
 
             if (match is null || angelName is null) continue;
 
-            foreach (var s in match)
-            {
-                if (!TryParseExpiry(s.Expiry, out var expiry, out var label))
-                    continue;
-                if (expiry < today) continue;
-
-                var isOpt = s.InstrumentType.Equals("OPTSTK", StringComparison.OrdinalIgnoreCase);
-                string? optType = null;
-                decimal? strike = null;
-                if (isOpt)
-                {
-                    optType = InferOptionType(s.Symbol);
-                    if (optType is null) continue;
-                    strike = ParseStrike(s.Strike);
-                    if (strike is null or <= 0) continue;
-                }
-
-                _ = int.TryParse(s.LotSize, out var lot);
-                if (lot <= 0) lot = 1;
-                _ = decimal.TryParse(s.TickSize, NumberStyles.Any, CultureInfo.InvariantCulture, out var tick);
-                if (tick <= 0) tick = 0.05m;
-
-                rows.Add(new NfoContractRow
-                {
-                    Id = Guid.NewGuid(),
-                    UnderlyingInstrumentId = eq.Id,
-                    AppSymbol = eq.Symbol,
-                    AngelName = angelName,
-                    Kind = isOpt ? "option" : "future",
-                    OptionType = optType,
-                    Strike = strike,
-                    Expiry = expiry,
-                    ExpiryLabel = label,
-                    SymbolToken = s.Token,
-                    TradingSymbol = s.Symbol,
-                    LotSize = lot,
-                    TickSize = tick,
-                });
-            }
+            rows.AddRange(MapContracts(eq, angelName, match, today));
         }
 
         await _nfo.ReplaceNfoContractsAsync(rows, ct);
         _logger.LogInformation("NFO sync: stored {Count} live contracts for universe", rows.Count);
+        return rows.Count;
+    }
+
+    /// <summary>Map FUTSTK/OPTSTK for one equity without wiping other underlyings.</summary>
+    public async Task<int> SyncUnderlyingNfoAsync(Guid underlyingInstrumentId, CancellationToken ct = default)
+    {
+        var eq = await _instruments.GetEquityByIdAsync(underlyingInstrumentId, ct);
+        if (eq is null)
+            return 0;
+
+        var scrips = await _angel.DownloadScripMasterAsync(ct);
+        var nfo = scrips
+            .Where(s => s.ExchSeg.Equals("NFO", StringComparison.OrdinalIgnoreCase))
+            .Where(s =>
+                s.InstrumentType.Equals("OPTSTK", StringComparison.OrdinalIgnoreCase)
+                || s.InstrumentType.Equals("FUTSTK", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var byName = nfo
+            .GroupBy(s => s.Name.Trim().ToUpperInvariant())
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        List<AngelScrip>? match = null;
+        string? angelName = null;
+        foreach (var key in LookupKeys(eq.Symbol))
+        {
+            if (byName.TryGetValue(key, out match))
+            {
+                angelName = key;
+                break;
+            }
+        }
+
+        if (match is null || angelName is null)
+        {
+            _logger.LogInformation("NFO sync: no FUTSTK/OPTSTK for {Symbol}", eq.Symbol);
+            return 0;
+        }
+
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromHours(5.5)).DateTime);
+        var rows = MapContracts(eq, angelName, match, today);
+
+        await _nfo.ReplaceNfoForUnderlyingAsync(underlyingInstrumentId, rows, ct);
+        _logger.LogInformation(
+            "NFO sync: stored {Count} contracts for {Symbol} ({Futures} futures)",
+            rows.Count, eq.Symbol, rows.Count(r => r.Kind == "future"));
         return rows.Count;
     }
 
@@ -196,6 +204,53 @@ public sealed class NfoSyncService
         if (v >= 100_000m && v == Math.Truncate(v) && v % 100 == 0)
             return v / 100m;
         return v;
+    }
+
+    private static List<NfoContractRow> MapContracts(
+        Instrument eq, string angelName, IReadOnlyList<AngelScrip> match, DateOnly today)
+    {
+        var rows = new List<NfoContractRow>();
+        foreach (var s in match)
+        {
+            if (!TryParseExpiry(s.Expiry, out var expiry, out var label))
+                continue;
+            if (expiry < today) continue;
+
+            var isOpt = s.InstrumentType.Equals("OPTSTK", StringComparison.OrdinalIgnoreCase);
+            string? optType = null;
+            decimal? strike = null;
+            if (isOpt)
+            {
+                optType = InferOptionType(s.Symbol);
+                if (optType is null) continue;
+                strike = ParseStrike(s.Strike);
+                if (strike is null or <= 0) continue;
+            }
+
+            _ = int.TryParse(s.LotSize, out var lot);
+            if (lot <= 0) lot = 1;
+            _ = decimal.TryParse(s.TickSize, NumberStyles.Any, CultureInfo.InvariantCulture, out var tick);
+            if (tick <= 0) tick = 0.05m;
+
+            rows.Add(new NfoContractRow
+            {
+                Id = Guid.NewGuid(),
+                UnderlyingInstrumentId = eq.Id,
+                AppSymbol = eq.Symbol,
+                AngelName = angelName,
+                Kind = isOpt ? "option" : "future",
+                OptionType = optType,
+                Strike = strike,
+                Expiry = expiry,
+                ExpiryLabel = label,
+                SymbolToken = s.Token,
+                TradingSymbol = s.Symbol,
+                LotSize = lot,
+                TickSize = tick,
+            });
+        }
+
+        return rows;
     }
 
     private static List<string> LookupKeys(string appSymbol)

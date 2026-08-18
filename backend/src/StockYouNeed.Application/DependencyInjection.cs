@@ -23,6 +23,7 @@ public static class DependencyInjection
         services.AddScoped<Application.IndexOptions.IndexOptionNotificationService>();
         services.AddScoped<AnalysisRunService>();
         services.AddScoped<MomentumAnalysisService>();
+        services.AddScoped<MomentumFuturesService>();
         services.AddScoped<LiquidityAnalysisService>();
         services.AddScoped<Application.Confluence.ConfluenceService>();
         services.AddScoped<Application.Breakout.BreakoutAnalysisService>();

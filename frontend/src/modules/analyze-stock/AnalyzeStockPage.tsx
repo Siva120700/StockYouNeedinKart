@@ -14,6 +14,7 @@ import { MagnifyingGlass } from "@phosphor-icons/react";
 import { DataFactory } from "../../api/factories";
 import type { UniverseInstrument } from "../../api/types";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame from "../../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { formatMomentumScore } from "../../utils/momentumScore";
 import { AnalyzeStockApi } from "./api";
@@ -184,7 +185,7 @@ export default function AnalyzeStockPage() {
   const setup = result?.primarySetup;
 
   return (
-    <Stack spacing={2} sx={{ p: 2, maxWidth: 1100 }}>
+    <PageFrame scroll>
       <Autocomplete
         sx={{ maxWidth: 420 }}
         size="small"
@@ -712,6 +713,6 @@ export default function AnalyzeStockPage() {
           )}
         </Box>
       )}
-    </Stack>
+    </PageFrame>
   );
 }

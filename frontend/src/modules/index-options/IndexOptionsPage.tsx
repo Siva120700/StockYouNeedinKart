@@ -17,6 +17,7 @@ import { columnFactories } from "../../zen_components/table/columnFactories";
 import type { ColumnConfig } from "../../zen_components/table/columnTypes";
 import ZenTable from "../../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame, { ScrollPane } from "../../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { IndexOptionsApi } from "./api";
 import type { NiftyOptionChainSnapshot, NiftyOrbRecommendation } from "./types";
@@ -680,7 +681,7 @@ export default function IndexOptionsPage() {
   }, [statusFilter, running, tab]);
 
   return (
-    <Stack spacing={3} p={2}>
+    <PageFrame>
       {error && <Alert severity="error">{error}</Alert>}
       {info ? (
         <Alert severity="success" onClose={() => setInfo(null)}>
@@ -701,6 +702,8 @@ export default function IndexOptionsPage() {
         <Tab value="traded" label={`Traded (${tradedRows.length})`} />
       </Tabs>
 
+      <ScrollPane>
+      <Stack spacing={3}>
       {tab === "active" ? (
         <>
           <ChainPanel chain={chain} />
@@ -792,6 +795,8 @@ export default function IndexOptionsPage() {
           />
         </>
       )}
-    </Stack>
+      </Stack>
+      </ScrollPane>
+    </PageFrame>
   );
 }

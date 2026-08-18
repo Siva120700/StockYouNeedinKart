@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import { ArrowClockwise, ArrowSquareOut } from "@phosphor-icons/react";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame from "../../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { NewsApi } from "./api";
 import { formatRelativeTime, type MarketNewsItem } from "./types";
@@ -81,7 +82,7 @@ export default function NewsPage() {
   }, [filter, loading]);
 
   return (
-    <Stack spacing={1.5}>
+    <PageFrame scroll>
       {error && <Alert severity="error">{error}</Alert>}
       {!error && !loading && visible.length === 0 && (
         <Alert severity="info">No headlines matched.</Alert>
@@ -122,6 +123,6 @@ export default function NewsPage() {
           </Stack>
         </Box>
       ))}
-    </Stack>
+    </PageFrame>
   );
 }

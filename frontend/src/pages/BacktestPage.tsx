@@ -30,6 +30,7 @@ import { columnFactories } from "../zen_components/table/columnFactories";
 import type { ColumnConfig } from "../zen_components/table/columnTypes";
 import ZenTable from "../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame from "../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../constants";
 import {
   downloadPdfTable,
@@ -649,10 +650,7 @@ export default function BacktestPage() {
   }
 
   return (
-    <MuiStack
-      spacing={2}
-      sx={{ height: "100%", overflow: "hidden", minHeight: 0 }}
-    >
+    <PageFrame>
       <Box sx={{ flexShrink: 0 }}>
         {error ? <Alert severity="error">{error}</Alert> : null}
         {info ? <Alert severity="success" onClose={() => setInfo(null)}>{info}</Alert> : null}
@@ -1031,7 +1029,7 @@ export default function BacktestPage() {
           </Box>
         ) : null}
       </Box>
-    </MuiStack>
+    </PageFrame>
   );
 }
 

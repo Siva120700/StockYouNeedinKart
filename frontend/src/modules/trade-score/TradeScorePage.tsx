@@ -17,6 +17,7 @@ import { columnFactories } from "../../zen_components/table/columnFactories";
 import type { ColumnConfig } from "../../zen_components/table/columnTypes";
 import ZenTable from "../../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame, { TablePane } from "../../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { TradeScoreApi } from "./api";
 import type { TradeConfidenceScore } from "./types";
@@ -344,26 +345,26 @@ export default function TradeScorePage() {
         : "No trade scores yet. Run trade score (refreshes Signals + Liquidity Fresh, then scores).";
 
   return (
-    <>
+    <PageFrame>
       {error ? (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error">
           {error}
         </Alert>
       ) : null}
       {info ? (
-        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo(null)}>
+        <Alert severity="success" onClose={() => setInfo(null)}>
           {info}
         </Alert>
       ) : null}
-      <Alert severity="info" sx={{ mb: 2 }}>
+      <Alert severity="info">
         Separate high-probability engine. Primary <strong>Signals</strong> (40%) +{" "}
         <strong>Liquidity Fresh</strong> (20%) + <strong>Quality Breakout</strong> (20%).
         F&amp;O layers (20%) — Phase 3–4. SL = tighter stop, entries within 0.2%.
         Existing Signals / Liquidity pages are unchanged.
       </Alert>
-      {running ? <LinearProgress sx={{ mb: 2 }} /> : null}
+      {running ? <LinearProgress /> : null}
       {tab === "active" && filteredActive.length > 0 ? (
-        <Box sx={{ mb: 2 }}>
+        <Box>
           <Typography variant="subtitle2" sx={{ mb: 1 }}>
             Top pick
           </Typography>
@@ -390,7 +391,7 @@ export default function TradeScorePage() {
           setTab(v);
           setSelectedTradedIds([]);
         }}
-        sx={{ mb: 1.5, minHeight: 40 }}
+        sx={{ minHeight: 40 }}
       >
         <Tab value="active" label={`Active (${filteredActive.length})`} />
         <Tab value="history" label={`History (${historyRows.length})`} />
@@ -402,18 +403,21 @@ export default function TradeScorePage() {
           onDelete={onDeleteSelectedTraded}
         />
       ) : null}
-      <ZenTable
-        columns={columns}
-        rows={tableRows}
-        getRowId={(r) => (tab === "active" ? r.id : tradedRowId(r))}
-        loading={loading}
-        enableSearch
-        searchPlaceholder="Search symbol…"
-        emptyMessage={emptyMessage}
-        enableSelection={tab === "traded"}
-        selectedRowIds={tab === "traded" ? selectedTradedIds : undefined}
-        onSelectedRowIdsChange={tab === "traded" ? setSelectedTradedIds : undefined}
-      />
-    </>
+      <TablePane>
+        <ZenTable
+          fillHeight
+          columns={columns}
+          rows={tableRows}
+          getRowId={(r) => (tab === "active" ? r.id : tradedRowId(r))}
+          loading={loading}
+          enableSearch
+          searchPlaceholder="Search symbol…"
+          emptyMessage={emptyMessage}
+          enableSelection={tab === "traded"}
+          selectedRowIds={tab === "traded" ? selectedTradedIds : undefined}
+          onSelectedRowIdsChange={tab === "traded" ? setSelectedTradedIds : undefined}
+        />
+      </TablePane>
+    </PageFrame>
   );
 }

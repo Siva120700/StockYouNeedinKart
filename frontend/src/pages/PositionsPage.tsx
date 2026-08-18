@@ -6,6 +6,7 @@ import type { OpenPosition } from "../api/types";
 import { columnFactories } from "../zen_components/table/columnFactories";
 import ZenTable from "../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame, { TablePane } from "../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../constants";
 import {
   closeLocalDayPosition,
@@ -170,21 +171,24 @@ export default function PositionsPage() {
   );
 
   return (
-    <>
+    <PageFrame>
       {error ? (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error">
           {error}
         </Alert>
       ) : null}
-      <ZenTable
-        columns={columns}
-        rows={rows}
-        getRowId={(r) => r.id}
-        loading={loading}
-        enableSearch
-        searchPlaceholder="Search symbol or name…"
-        emptyMessage="No open positions. Use Trade on a signals page."
-      />
-    </>
+      <TablePane>
+        <ZenTable
+          fillHeight
+          columns={columns}
+          rows={rows}
+          getRowId={(r) => r.id}
+          loading={loading}
+          enableSearch
+          searchPlaceholder="Search symbol or name…"
+          emptyMessage="No open positions. Use Trade on a signals page."
+        />
+      </TablePane>
+    </PageFrame>
   );
 }

@@ -18,6 +18,7 @@ import LeftPanel from "./LeftPanel";
 import ZenBreadcrumbs from "../shared/ZenBreadcrumbs";
 import ZenSyncStatusIcon from "../shared/ZenSyncStatusIcon";
 import IstLiveClock from "../shared/IstLiveClock";
+import PremiumCalculatorPopover from "../shared/PremiumCalculatorPopover";
 import IndexOptionNotificationBell from "./IndexOptionNotificationBell";
 import {
   DEFAULT_ICON_SIZE,
@@ -77,6 +78,7 @@ const AppBarStyled = styled(AppBar, {
   boxShadow: "none",
   pointerEvents: "auto",
   zIndex: theme.zIndex.appBar,
+  flexShrink: 0,
 }));
 
 const ResizeHandle = styled("div")(({ theme }) => ({
@@ -375,6 +377,7 @@ const ZenPrimaryLayout: React.FC<ZenPrimaryLayoutProps> = ({ children }) => {
                 <Stack direction="row" spacing={1} alignItems="center">
                   {breadcrumbActions}
                   <IstLiveClock />
+                  <PremiumCalculatorPopover />
                   <IndexOptionNotificationBell />
                   <ZenSyncStatusIcon isSyncing={isSyncing} />
                 </Stack>
@@ -420,10 +423,17 @@ const ZenPrimaryLayout: React.FC<ZenPrimaryLayoutProps> = ({ children }) => {
           sx={{
             flex: 1,
             minHeight: 0,
-            overflow: "auto",
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
             px: { xs: 2, sm: 3 },
             py: 2,
             bgcolor: "grey.50",
+            "& > *": {
+              flex: 1,
+              minHeight: 0,
+              height: "100%",
+            },
           }}
         >
           {children}

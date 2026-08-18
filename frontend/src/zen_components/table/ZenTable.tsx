@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Box,
   Checkbox,
@@ -29,6 +29,9 @@ export type ZenTableProps<T> = {
   loading?: boolean;
   emptyMessage?: string;
   onRowClick?: (row: T) => void;
+  /** When set with renderExpandedRow, a detail panel opens under that row. */
+  expandedRowId?: string | null;
+  renderExpandedRow?: (row: T) => ReactNode;
   dense?: boolean;
   /** Client-side pagination (default true when rows.length > pageSize). */
   enablePagination?: boolean;
@@ -87,6 +90,8 @@ export function ZenTable<T>({
   loading = false,
   emptyMessage = "No rows",
   onRowClick,
+  expandedRowId = null,
+  renderExpandedRow,
   dense = true,
   enablePagination = true,
   defaultPageSize = 25,
@@ -220,7 +225,7 @@ export function ZenTable<T>({
         display: "flex",
         flexDirection: "column",
         maxHeight: "100%",
-        ...(fillHeight ? { height: "100%", minHeight: 0 } : {}),
+        ...(fillHeight ? { height: "100%", minHeight: 0, flex: 1 } : {}),
       }}
     >
       {enableSearch ? (
@@ -308,41 +313,52 @@ export function ZenTable<T>({
               pagedRows.map((row) => {
                 const id = getRowId(row);
                 const checked = selectedIds.includes(id);
+                const expanded = expandedRowId === id && !!renderExpandedRow;
                 return (
-                  <TableRow
-                    key={id}
-                    hover
-                    selected={checked}
-                    onClick={onRowClick ? () => onRowClick(row) : undefined}
-                    sx={{ cursor: onRowClick ? "pointer" : "default" }}
-                  >
-                    {enableSelection ? (
-                      <TableCell padding="checkbox">
-                        <Checkbox
-                          size="small"
-                          checked={checked}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={() => toggleOne(id)}
-                          inputProps={{ "aria-label": `Select row ${id}` }}
-                        />
-                      </TableCell>
-                    ) : null}
-                    {columns.map((col) => {
-                      const value = col.getValue(row);
-                      const content = col.displayRenderer
-                        ? col.displayRenderer(value, row)
-                        : String(value ?? "");
-                      return (
-                        <TableCell
-                          key={col.field}
-                          align={col.cellAlignment ?? "left"}
-                          sx={{ width: col.width, minWidth: col.width }}
-                        >
-                          {content}
+                  <Fragment key={id}>
+                    <TableRow
+                      hover
+                      selected={checked || expanded}
+                      onClick={onRowClick ? () => onRowClick(row) : undefined}
+                      sx={{ cursor: onRowClick ? "pointer" : "default" }}
+                    >
+                      {enableSelection ? (
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            size="small"
+                            checked={checked}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => toggleOne(id)}
+                            inputProps={{ "aria-label": `Select row ${id}` }}
+                          />
                         </TableCell>
-                      );
-                    })}
-                  </TableRow>
+                      ) : null}
+                      {columns.map((col) => {
+                        const value = col.getValue(row);
+                        const content = col.displayRenderer
+                          ? col.displayRenderer(value, row)
+                          : String(value ?? "");
+                        return (
+                          <TableCell
+                            key={col.field}
+                            align={col.cellAlignment ?? "left"}
+                            sx={{ width: col.width, minWidth: col.width }}
+                          >
+                            {content}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                    {expanded ? (
+                      <TableRow>
+                        <TableCell colSpan={colSpan} sx={{ py: 0, px: 0, bgcolor: "grey.50" }}>
+                          <Box sx={{ px: 2, pr: 4, py: 1.5 }}>
+                            {renderExpandedRow(row)}
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </Fragment>
                 );
               })
             )}

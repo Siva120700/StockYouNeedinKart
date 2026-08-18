@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Stack, Typography } from "@mui/material";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame from "../../zen_components/layout/PageFrame";
 import { SectorScopeApi, type SectorScopeSector, type SectorScopeStock } from "./api";
 
 const FLAT_HIDE = 0.05;
@@ -261,7 +262,7 @@ export default function SectorScopePage() {
   );
 
   return (
-    <Stack spacing={3} p={2}>
+    <PageFrame scroll>
       {error && <Alert severity="error">{error}</Alert>}
       <Alert severity="info">
         Median % change by sector vs Nifty 50
@@ -297,6 +298,6 @@ export default function SectorScopePage() {
         <ColorLegend />
         <SectorTreemap sectors={sectors} />
       </Box>
-    </Stack>
+    </PageFrame>
   );
 }

@@ -1,20 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
   FormControlLabel,
+  IconButton,
   Switch,
   Stack as MuiStack,
   Tab,
   Tabs,
 } from "@mui/material";
-import { Play, Handshake, FilePdf, FileXls } from "@phosphor-icons/react";
+import { CaretDown, CaretRight, Play, Handshake, FilePdf, FileXls } from "@phosphor-icons/react";
 import { ActionFactory, DataFactory } from "../api/factories";
-import type { MomentumSignal } from "../api/types";
+import type { MomentumFuturesSuggestion, MomentumSignal } from "../api/types";
 import { columnFactories } from "../zen_components/table/columnFactories";
 import type { ColumnConfig } from "../zen_components/table/columnTypes";
 import ZenTable from "../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame, { TablePane } from "../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../constants";
 import {
   downloadExcelTable,
@@ -31,6 +33,7 @@ import {
   type SignalDayEntry,
 } from "../utils/signalDayHistory";
 import TradedDeleteBar from "../zen_components/shared/TradedDeleteBar";
+import MomentumFuturesDetailPanel from "../components/MomentumFuturesDetailPanel";
 import { formatMomentumScore, MIN_MOMENTUM_AVERAGE_SCORE, momentumTierLabel } from "../utils/momentumScore";
 
 export type MomentumRuleset = "v2" | "v3";
@@ -92,6 +95,9 @@ export default function MomentumSignalsPage({
   const [sectorCheck, setSectorCheck] = useState(false);
   const [freshCrossCheck, setFreshCrossCheck] = useState(false);
   const [hideLaggingRs, setHideLaggingRs] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [futuresCache, setFuturesCache] = useState<Record<string, MomentumFuturesSuggestion>>({});
+  const [futuresLoadingId, setFuturesLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
@@ -125,6 +131,8 @@ export default function MomentumSignalsPage({
       const synced = syncSignalDayHistory(historyScope, list);
       setHistoryRows(synced.history);
       setTradedRows(synced.traded);
+      setFuturesCache({});
+      setExpandedId(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -186,6 +194,29 @@ export default function MomentumSignalsPage({
     if (hideLaggingRs) list = list.filter((r) => !r.sectorRs?.downranked);
     return [...list].sort((a, b) => b.momentumScore - a.momentumScore);
   }, [rows, ruleset, sectorCheck, freshCrossCheck, hideLaggingRs]);
+
+  const loadFutures = useCallback(async (row: MomentumSignal) => {
+    setFuturesLoadingId(row.id);
+    try {
+      const suggestion = await DataFactory.momentumFuturesSuggestion(row);
+      setFuturesCache((prev) => ({ ...prev, [row.id]: suggestion }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setFuturesLoadingId(null);
+    }
+  }, []);
+
+  const toggleExpand = useCallback(
+    (row: MomentumSignal) => {
+      setExpandedId((prev) => {
+        const next = prev === row.id ? null : row.id;
+        if (next && !futuresCache[row.id]) void loadFutures(row);
+        return next;
+      });
+    },
+    [loadFutures, futuresCache],
+  );
 
   const tableRows: MomentumSignal[] = useMemo(() => {
     if (tab === "history") return historyRows;
@@ -285,7 +316,37 @@ export default function MomentumSignalsPage({
   }, [ruleset, tab, loading, running, sectorCheck, freshCrossCheck, hideLaggingRs, tableRows, pageTitle]);
 
   const columns = useMemo(() => {
-    const base: ColumnConfig<MomentumSignal>[] = [
+    const base: ColumnConfig<MomentumSignal>[] = [];
+
+    if (tab === "active") {
+      base.push(
+        columnFactories.createTextColumn<MomentumSignal>({
+          field: "_expand",
+          headerName: "",
+          width: 44,
+          sortable: false,
+          getValue: () => "",
+          displayRenderer: (_v, row) => (
+            <IconButton
+              size="small"
+              aria-label={expandedId === row.id ? "Collapse futures" : "Expand futures"}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleExpand(row);
+              }}
+            >
+              {expandedId === row.id ? (
+                <CaretDown size={DEFAULT_SMALL_ICON_SIZE} />
+              ) : (
+                <CaretRight size={DEFAULT_SMALL_ICON_SIZE} />
+              )}
+            </IconButton>
+          ),
+        }),
+      );
+    }
+
+    base.push(
       columnFactories.createTextColumn<MomentumSignal>({
         field: "appSymbol",
         headerName: "Symbol",
@@ -362,7 +423,7 @@ export default function MomentumSignalsPage({
         width: 90,
         getValue: (r) => r.volumeOk,
       }),
-    ];
+    );
 
     if (tab === "history") {
       base.push(
@@ -405,16 +466,16 @@ export default function MomentumSignalsPage({
     }
 
     return base;
-  }, [tab, historyScope, scoreHeader]);
+  }, [tab, historyScope, scoreHeader, expandedId, toggleExpand]);
 
   return (
-    <MuiStack spacing={2}>
+    <PageFrame>
       {error ? <Alert severity="error">{error}</Alert> : null}
       {info ? <Alert severity="info">{info}</Alert> : null}
       <Alert severity="info" variant="outlined">
         {ruleset === "v3"
-          ? "Jegadeesh–Titman multi-horizon momentum (12–1 / 6–1 / 3–1 + RS vs Nifty). All scored breakouts are ranked /10."
-          : "StepOne-style composite (trend, returns, RVOL, RSI, ATR breakout, candle strength). Only Average tier and above (score ≥ 4 /10) are shown."}
+          ? "Jegadeesh–Titman multi-horizon momentum (12–1 / 6–1 / 3–1 + RS vs Nifty). All scored breakouts are ranked /10. Click ▸ for nearest FUTSTK entry / exit / targets."
+          : "StepOne-style composite (trend, returns, RVOL, RSI, ATR breakout, candle strength). Average tier and above (score ≥ 4). Click ▸ for futures contract details."}
       </Alert>
       <Tabs value={tab} onChange={(_, v) => setTab(v as MomentumTab)}>
         <Tab value="active" label={`Active (${filteredActive.length})`} />
@@ -427,17 +488,33 @@ export default function MomentumSignalsPage({
           onDelete={onDeleteSelectedTraded}
         />
       ) : null}
-      <ZenTable
-        rows={tableRows}
-        columns={columns}
-        loading={loading}
-        enableSearch
-        searchPlaceholder="Filter symbols…"
-        getRowId={(r) => (tab === "traded" ? tradedRowId(r) : r.id)}
-        selectable={tab === "traded"}
-        selectedRowIds={tab === "traded" ? selectedTradedIds : undefined}
-        onSelectedRowIdsChange={tab === "traded" ? setSelectedTradedIds : undefined}
-      />
-    </MuiStack>
+      <TablePane>
+        <ZenTable
+          fillHeight
+          rows={tableRows}
+          columns={columns}
+          loading={loading}
+          enableSearch
+          searchPlaceholder="Filter symbols…"
+          getRowId={(r) => (tab === "traded" ? tradedRowId(r) : r.id)}
+          enableSelection={tab === "traded"}
+          selectedRowIds={tab === "traded" ? selectedTradedIds : undefined}
+          onSelectedRowIdsChange={tab === "traded" ? setSelectedTradedIds : undefined}
+          onRowClick={tab === "active" ? (r) => toggleExpand(r) : undefined}
+          expandedRowId={tab === "active" ? expandedId : null}
+          renderExpandedRow={
+            tab === "active"
+              ? (row) => (
+                  <MomentumFuturesDetailPanel
+                    signal={row}
+                    futures={futuresCache[row.id] ?? null}
+                    loading={futuresLoadingId === row.id}
+                  />
+                )
+              : undefined
+          }
+        />
+      </TablePane>
+    </PageFrame>
   );
 }

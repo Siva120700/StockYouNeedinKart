@@ -198,6 +198,42 @@ public sealed class MomentumSignalRow : ISectorRanked
     public SectorRelativeStrengthInfo? SectorRs { get; set; }
 }
 
+/// <summary>Nearest stock future mapped to a momentum signal's underlying levels.</summary>
+public sealed class MomentumFuturesSuggestionRow
+{
+    public Guid InstrumentId { get; set; }
+    public string Side { get; set; } = "";
+    public string? TradingSymbol { get; set; }
+    public string? ExpiryLabel { get; set; }
+    public string? SymbolToken { get; set; }
+    public int LotSize { get; set; } = 1;
+    public decimal? SpotLtp { get; set; }
+    public decimal UnderlyingEntry { get; set; }
+    public decimal UnderlyingStopLoss { get; set; }
+    public decimal? UnderlyingTargetT1 { get; set; }
+    public decimal? UnderlyingTargetT2 { get; set; }
+    public decimal? UnderlyingTargetT3 { get; set; }
+    public decimal? FuturesEntry { get; set; }
+    public decimal? FuturesExit { get; set; }
+    public decimal? FuturesTargetT1 { get; set; }
+    public decimal? FuturesTargetT2 { get; set; }
+    public decimal? FuturesTargetT3 { get; set; }
+    public decimal? PremiumPct { get; set; }
+    public string? BuildUp { get; set; }
+    public bool FuturesConflict { get; set; }
+    public string? SkipReason { get; set; }
+    /// <summary>Futures LTP × lot size (1 lot notional).</summary>
+    public decimal? ContractValue { get; set; }
+    /// <summary>Estimated SPAN + exposure (~18% of notional). Not broker RMS.</summary>
+    public decimal? MarginRequired { get; set; }
+    /// <summary>Rupee P&amp;L at T1 for 1 lot.</summary>
+    public decimal? ExpectedProfitT1 { get; set; }
+    public decimal? ExpectedProfitT2 { get; set; }
+    public decimal? ExpectedProfitT3 { get; set; }
+    /// <summary>Rupee loss if SL hits, 1 lot (positive = amount at risk).</summary>
+    public decimal? ExpectedStopLoss { get; set; }
+}
+
 public sealed class LiquiditySignalRow : ISectorRanked
 {
     public Guid Id { get; set; }

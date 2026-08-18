@@ -67,6 +67,19 @@ public sealed class Query
         => await sectorScope.RankAsync(
             await portfolio.GetMomentumSignalsAsync(user.UserId, runId, ruleset ?? "v2", ct), ct);
 
+    public async Task<MomentumFuturesSuggestionRow> MomentumFuturesSuggestion(
+        Guid instrumentId,
+        string side,
+        decimal entryPrice,
+        decimal initialStopLoss,
+        decimal? targetT1,
+        decimal? targetT2,
+        decimal? targetT3,
+        [Service] MomentumFuturesService futures,
+        CancellationToken ct)
+        => await futures.GetSuggestionAsync(
+            instrumentId, side, entryPrice, initialStopLoss, targetT1, targetT2, targetT3, ct);
+
     public async Task<IReadOnlyList<ConfluenceSignalRow>> ConfluenceSignals(
         [Service] ICurrentUserAccessor user,
         [Service] Application.Confluence.ConfluenceService confluence,

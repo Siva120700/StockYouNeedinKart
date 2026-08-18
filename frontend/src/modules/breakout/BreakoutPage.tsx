@@ -4,6 +4,7 @@ import { Play } from "@phosphor-icons/react";
 import { columnFactories } from "../../zen_components/table/columnFactories";
 import ZenTable from "../../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame, { TablePane } from "../../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import {
   createHistoricalHitRateColumn,
@@ -116,15 +117,24 @@ export default function BreakoutPage() {
   );
 
   return (
-    <>
-      {error ? <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert> : null}
-      <Alert severity="info" sx={{ mb: 2 }}>
+    <PageFrame>
+      {error ? <Alert severity="error">{error}</Alert> : null}
+      <Alert severity="info">
         <strong>Pattern breakouts</strong> for F&amp;O confirmation: range, ascending/descending
         triangles, double top/bottom. First run may sync ~40 daily bars from Angel (a few minutes).
         Turn off “Confirmed only” to see scanned near-misses.
       </Alert>
-      <ZenTable columns={columns} rows={visible} getRowId={(r) => r.id} loading={loading} enableSearch
-        emptyMessage="No pattern breakouts. Click Run breakout scan." />
-    </>
+      <TablePane>
+        <ZenTable
+          fillHeight
+          columns={columns}
+          rows={visible}
+          getRowId={(r) => r.id}
+          loading={loading}
+          enableSearch
+          emptyMessage="No pattern breakouts. Click Run breakout scan."
+        />
+      </TablePane>
+    </PageFrame>
   );
 }

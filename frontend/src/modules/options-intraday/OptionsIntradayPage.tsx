@@ -19,6 +19,7 @@ import { columnFactories } from "../../zen_components/table/columnFactories";
 import type { ColumnConfig } from "../../zen_components/table/columnTypes";
 import ZenTable from "../../zen_components/table/ZenTable";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
+import PageFrame, { TablePane } from "../../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
 import { OptionsIntradayApi } from "./api";
 import type { OptionsIntradayRecommendation } from "./types";
@@ -357,7 +358,7 @@ export default function OptionsIntradayPage() {
         : "No recommendations. Click Run.";
 
   return (
-    <Stack spacing={2} p={2}>
+    <PageFrame>
       {error && <Alert severity="error">{error}</Alert>}
       {info ? (
         <Alert severity="success" onClose={() => setInfo(null)}>
@@ -388,17 +389,21 @@ export default function OptionsIntradayPage() {
           onDelete={onDeleteSelectedTraded}
         />
       ) : null}
-      <ZenTable
-        rows={tableRows}
-        columns={columns}
-        loading={loading}
-        getRowId={(r) => (tab === "active" ? r.id : tradedRowId(r))}
-        onRowClick={(r) => setExpandedId((id) => (id === r.id ? null : r.id))}
-        emptyMessage={emptyMessage}
-        enableSelection={tab === "traded"}
-        selectedRowIds={tab === "traded" ? selectedTradedIds : undefined}
-        onSelectedRowIdsChange={tab === "traded" ? setSelectedTradedIds : undefined}
-      />
+      <TablePane>
+        <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          <ZenTable
+            fillHeight
+            rows={tableRows}
+            columns={columns}
+            loading={loading}
+            getRowId={(r) => (tab === "active" ? r.id : tradedRowId(r))}
+            onRowClick={(r) => setExpandedId((id) => (id === r.id ? null : r.id))}
+            emptyMessage={emptyMessage}
+            enableSelection={tab === "traded"}
+            selectedRowIds={tab === "traded" ? selectedTradedIds : undefined}
+            onSelectedRowIdsChange={tab === "traded" ? setSelectedTradedIds : undefined}
+          />
+        </Box>
       <Collapse in={!!expanded}>
         {expanded && (
           <Box
@@ -494,6 +499,7 @@ export default function OptionsIntradayPage() {
           </Box>
         )}
       </Collapse>
-    </Stack>
+      </TablePane>
+    </PageFrame>
   );
 }

@@ -46,6 +46,36 @@ export type MomentumSignal = {
   sectorRs?: SectorRelativeStrength | null;
 };
 
+export type MomentumFuturesSuggestion = {
+  instrumentId: string;
+  side: string;
+  tradingSymbol?: string | null;
+  expiryLabel?: string | null;
+  symbolToken?: string | null;
+  lotSize: number;
+  spotLtp?: number | null;
+  underlyingEntry: number;
+  underlyingStopLoss: number;
+  underlyingTargetT1?: number | null;
+  underlyingTargetT2?: number | null;
+  underlyingTargetT3?: number | null;
+  futuresEntry?: number | null;
+  futuresExit?: number | null;
+  futuresTargetT1?: number | null;
+  futuresTargetT2?: number | null;
+  futuresTargetT3?: number | null;
+  premiumPct?: number | null;
+  buildUp?: string | null;
+  futuresConflict: boolean;
+  skipReason?: string | null;
+  contractValue?: number | null;
+  marginRequired?: number | null;
+  expectedProfitT1?: number | null;
+  expectedProfitT2?: number | null;
+  expectedProfitT3?: number | null;
+  expectedStopLoss?: number | null;
+};
+
 export type LiquiditySignal = {
   id: string;
   liquidityRunId: string;
