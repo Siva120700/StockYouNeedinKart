@@ -159,9 +159,35 @@ public sealed class MarketDataRepository : IMarketDataRepository
         return rows.ToList();
     }
 
+    public async Task<IReadOnlyList<MarketLtpRow>> GetUniverseLtpAsync(CancellationToken ct = default)
+    {
+        var sql = $"""
+            SELECT DISTINCT
+              i.id AS InstrumentId,
+              i.symbol AS AppSymbol,
+              i.name AS InstrumentName,
+              COALESCE(l.exchange::text, 'NSE') AS Exchange,
+              COALESCE(l.trading_symbol, '') AS TradingSymbol,
+              COALESCE(l.symbol_token, '') AS SymbolToken,
+              COALESCE(l.ltp, 0) AS Ltp,
+              l.fetched_at AS FetchedAt
+            FROM instruments i
+            JOIN universe_memberships u ON u.instrument_id = i.id
+            LEFT JOIN market_ltp l ON l.instrument_id = i.id
+            WHERE i.is_active
+              AND i.kind = 'equity'
+              AND u.valid_to IS NULL
+              AND u.universe IN ({UniverseCodes.SqlEquityScanIn})
+            ORDER BY i.symbol
+            """;
+        using var conn = _db.CreateConnection();
+        var rows = await conn.QueryAsync<MarketLtpRow>(new CommandDefinition(sql, cancellationToken: ct));
+        return rows.ToList();
+    }
+
     public async Task<IReadOnlyList<SectorScopeQuoteRow>> GetSectorScopeQuotesAsync(CancellationToken ct = default)
     {
-        const string sql = """
+        var sql = $"""
             WITH ranked AS (
               SELECT
                 b.instrument_id,
@@ -179,9 +205,9 @@ public sealed class MarketDataRepository : IMarketDataRepository
               e.symbol AS Symbol,
               e.name AS Name,
               e.kind AS Kind,
-              s.id AS SectorId,
-              s.symbol AS SectorSymbol,
-              s.name AS SectorName,
+              COALESCE(s.id, '00000000-0000-0000-0000-000000000001'::uuid) AS SectorId,
+              COALESCE(s.symbol, 'UNLINKED') AS SectorSymbol,
+              COALESCE(s.name, 'Other F&O') AS SectorName,
               COALESCE(NULLIF(l.ltp, 0), NULLIF(o.ltp, 0), last.close) AS Ltp,
               COALESCE(
                 CASE
@@ -198,12 +224,14 @@ public sealed class MarketDataRepository : IMarketDataRepository
                 last.open
               ) AS PrevClose
             FROM instruments e
-            JOIN instruments s ON s.id = e.sector_instrument_id AND s.kind = 'sector_index' AND s.is_active
+            JOIN universe_memberships u ON u.instrument_id = e.id AND u.valid_to IS NULL
+            LEFT JOIN instruments s ON s.id = e.sector_instrument_id AND s.kind = 'sector_index' AND s.is_active
             LEFT JOIN market_ltp l ON l.instrument_id = e.id
             LEFT JOIN market_ohlc o ON o.instrument_id = e.id
             LEFT JOIN ranked last ON last.instrument_id = e.id AND last.rn = 1
             LEFT JOIN ranked prev ON prev.instrument_id = e.id AND prev.rn = 2
             WHERE e.kind = 'equity' AND e.is_active
+              AND u.universe IN ({UniverseCodes.SqlEquityScanIn})
 
             UNION ALL
 

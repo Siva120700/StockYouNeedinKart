@@ -327,4 +327,12 @@ export const ActionFactory = {
     );
     return data.runHistoricalBacktest;
   },
+
+  /** Re-seed F&O names from Angel and refresh NSE tokens for the stock list. */
+  async syncUniverseTokens(): Promise<number> {
+    const data = await gql<{ syncUniverseTokens: number }>(
+      `mutation { syncUniverseTokens }`,
+    );
+    return data.syncUniverseTokens;
+  },
 };

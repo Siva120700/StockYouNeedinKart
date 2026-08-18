@@ -133,6 +133,8 @@ public sealed class UniverseSeedService
     {
         // Old NSE symbols — retire on every seed so we don't need a one-off SQL migration.
         await _instruments.RetireEquitySymbolsAsync(["LTIM", "TATAMOTORS"], ct);
+        // Angel F&O scrip master includes exchange test underlyings — never scan these.
+        await _instruments.RetireEquitySymbolsLikeAsync("%NSETEST%", ct);
 
         foreach (var (symbol, name) in Nifty50)
         {
@@ -149,8 +151,45 @@ public sealed class UniverseSeedService
 
         await SeedSectorsAndLinksAsync(ct);
 
-        _logger.LogInformation("Universe seed completed ({N50} Nifty50 + {Extra} Nifty100 extras).",
-            Nifty50.Length, Nifty100Extra.Length);
+        var fnoCount = await SeedFnoUnderlyingsAsync(ct);
+
+        _logger.LogInformation(
+            "Universe seed completed ({N50} Nifty50 + {Extra} Nifty100 extras + {Fno} F&O).",
+            Nifty50.Length, Nifty100Extra.Length, fnoCount);
+    }
+
+    /// <summary>All NSE F&amp;O equity underlyings (embedded — no file/Angel required).</summary>
+    private async Task<int> SeedFnoUnderlyingsAsync(CancellationToken ct)
+    {
+        var symbols = FnoUnderlyingSymbols.All;
+        if (symbols.Length == 0)
+        {
+            _logger.LogWarning("FnoUnderlyingSymbols.All is empty — F&O universe skipped.");
+            return 0;
+        }
+
+        var seeded = 0;
+        try
+        {
+            foreach (var symbol in symbols)
+            {
+                ct.ThrowIfCancellationRequested();
+                await _instruments.SeedInstrumentIfMissingAsync(symbol, symbol, ct);
+                await _instruments.EnsureUniverseMembershipAsync(UniverseCodes.NiftyFno, symbol, ct);
+                if (EquitySector.TryGetValue(symbol, out var sector))
+                    await _instruments.LinkEquityToSectorAsync(symbol, sector, ct);
+                seeded++;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "F&O seed failed at {Seeded}/{Total}. Ensure migration 031_nifty_fno_universe.sql ran (restart API).",
+                seeded, symbols.Length);
+            throw;
+        }
+
+        return seeded;
     }
 
     private static readonly (string Symbol, string Name, string AngelNameContains)[] Sectors =

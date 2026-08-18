@@ -13,7 +13,7 @@ public sealed class InstrumentRepository : IInstrumentRepository
 
     public async Task<IReadOnlyList<Instrument>> GetUniverseEquitiesAsync(CancellationToken ct = default)
     {
-        const string sql = """
+        var sql = $"""
             SELECT DISTINCT i.id AS Id, i.kind AS Kind, i.symbol AS Symbol, i.name AS Name,
                    i.exchange AS Exchange, i.is_active AS IsActive
             FROM instruments i
@@ -21,7 +21,7 @@ public sealed class InstrumentRepository : IInstrumentRepository
             WHERE i.is_active
               AND i.kind = 'equity'
               AND u.valid_to IS NULL
-              AND u.universe IN ('nifty_50', 'nifty_100')
+              AND u.universe IN ({UniverseCodes.SqlEquityScanIn})
             ORDER BY i.symbol
             """;
         using var conn = _db.CreateConnection();
@@ -44,7 +44,7 @@ public sealed class InstrumentRepository : IInstrumentRepository
 
     public async Task<IReadOnlyList<AngelTokenRow>> GetActiveTokensForUniversesAsync(CancellationToken ct = default)
     {
-        const string sql = """
+        var sql = $"""
             SELECT DISTINCT
               m.instrument_id AS InstrumentId,
               m.exchange::text AS Exchange,
@@ -57,7 +57,7 @@ public sealed class InstrumentRepository : IInstrumentRepository
             JOIN universe_memberships u ON u.instrument_id = m.instrument_id
             WHERE m.is_active
               AND u.valid_to IS NULL
-              AND u.universe IN ('nifty_50', 'nifty_100')
+              AND u.universe IN ({UniverseCodes.SqlEquityScanIn})
             ORDER BY i.symbol
             """;
         using var conn = _db.CreateConnection();
@@ -156,6 +156,30 @@ public sealed class InstrumentRepository : IInstrumentRepository
             """;
         using var conn = _db.CreateConnection();
         await conn.ExecuteAsync(new CommandDefinition(sql, new { symbols = symbols.ToArray() }, cancellationToken: ct));
+    }
+
+    public async Task RetireEquitySymbolsLikeAsync(string symbolPattern, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(symbolPattern))
+            return;
+
+        const string sql = """
+            UPDATE instruments
+            SET is_active = false, updated_at = now()
+            WHERE kind = 'equity'
+              AND exchange = 'NSE'
+              AND symbol ILIKE @symbolPattern;
+
+            UPDATE universe_memberships um
+            SET valid_to = CURRENT_DATE
+            WHERE um.valid_to IS NULL
+              AND um.instrument_id IN (
+                SELECT i.id FROM instruments i
+                WHERE i.kind = 'equity' AND i.exchange = 'NSE' AND i.symbol ILIKE @symbolPattern
+              );
+            """;
+        using var conn = _db.CreateConnection();
+        await conn.ExecuteAsync(new CommandDefinition(sql, new { symbolPattern }, cancellationToken: ct));
     }
 
     public async Task SeedSectorIndexIfMissingAsync(string symbol, string name, CancellationToken ct = default)

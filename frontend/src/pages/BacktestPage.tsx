@@ -19,7 +19,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { FloppyDisk, FilePdf, Play, Stop, Trash } from "@phosphor-icons/react";
+import { FloppyDisk, FilePdf, Play, Stop, Trash, ArrowsClockwise } from "@phosphor-icons/react";
 import { ActionFactory, DataFactory } from "../api/factories";
 import type {
   BacktestNoteInput,
@@ -368,6 +368,7 @@ export default function BacktestPage() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [refreshingStocks, setRefreshingStocks] = useState(false);
   const [showManualForm, setShowManualForm] = useState(false);
   const [search, setSearch] = useState("");
   const [visibleRows, setVisibleRows] = useState<BacktestSymbolSummary[]>([]);
@@ -389,6 +390,39 @@ export default function BacktestPage() {
       setLoading(false);
     }
   }, [strategyFilter, riskRewardCheck, sectorCheck, setIsSyncing]);
+
+  const reloadUniverses = useCallback(async () => {
+    setRefreshingStocks(true);
+    setError(null);
+    try {
+      const list = await DataFactory.universes();
+      const sorted = [...list].sort((a, b) => a.symbol.localeCompare(b.symbol));
+      setUniverse(sorted);
+      if (sorted[0] && !runTarget) {
+        setRunTarget(sorted[0]);
+        setForm(emptyForm(sorted[0].id));
+      }
+      setInfo(`Stock list: ${sorted.length} symbols (Nifty + F&O). Syncing Angel tokens…`);
+
+      try {
+        await ActionFactory.syncUniverseTokens();
+        const refreshed = await DataFactory.universes();
+        const resorted = [...refreshed].sort((a, b) => a.symbol.localeCompare(b.symbol));
+        setUniverse(resorted);
+        setInfo(`Stock list refreshed — ${resorted.length} symbols (Nifty + F&O).`);
+      } catch (syncErr) {
+        setInfo(
+          `${sorted.length} symbols loaded. Token sync skipped: ${
+            syncErr instanceof Error ? syncErr.message : String(syncErr)
+          }`,
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshingStocks(false);
+    }
+  }, [runTarget]);
 
   useEffect(() => {
     setTitle("Backtest");
@@ -571,6 +605,11 @@ export default function BacktestPage() {
 
   const stats = useMemo(() => aggregateStats(visibleRows), [visibleRows]);
 
+  const uniqueResultSymbols = useMemo(() => {
+    const ids = new Set(tableRows.map((r) => r.instrumentId));
+    return ids.size;
+  }, [tableRows]);
+
   function onExportPdf() {
     const filterLabel = strategySelectionLabel(strategyFilter);
     downloadPdfTable({
@@ -579,7 +618,9 @@ export default function BacktestPage() {
       columns: backtestExportColumns,
       rows: visibleRows,
       summary: [
-        { label: "Rows", value: String(stats.stocks) },
+        { label: "Universe", value: String(universe.length) },
+        { label: "With results", value: String(uniqueResultSymbols) },
+        { label: "Result rows", value: String(stats.stocks) },
         { label: "Setups", value: String(stats.setups) },
         { label: "Target hits", value: String(stats.targetHits) },
         { label: "SL hits", value: String(stats.slHits) },
@@ -690,6 +731,15 @@ export default function BacktestPage() {
             isOptionEqualToValue={(a, b) => a.id === b.id}
             disabled={runningAll}
           />
+          <Button
+            size="small"
+            variant="outlined"
+            disabled={runningAll || refreshingStocks}
+            startIcon={<ArrowsClockwise size={DEFAULT_SMALL_ICON_SIZE} />}
+            onClick={() => void reloadUniverses()}
+          >
+            {refreshingStocks ? "Syncing…" : `Refresh stocks (${universe.length})`}
+          </Button>
           <Button
             size="small"
             variant="contained"
@@ -825,7 +875,9 @@ export default function BacktestPage() {
             borderRadius: 1,
           }}
         >
-          <Stat label="Rows" value={String(stats.stocks)} />
+          <Stat label="Universe" value={String(universe.length)} />
+          <Stat label="With results" value={String(uniqueResultSymbols)} />
+          <Stat label="Result rows" value={String(stats.stocks)} />
           <Stat label="Setups" value={String(stats.setups)} />
           <Stat label="Target hits" value={String(stats.targetHits)} />
           <Stat label="SL hits" value={String(stats.slHits)} />

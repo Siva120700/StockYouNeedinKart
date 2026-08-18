@@ -17,6 +17,7 @@ public sealed class IntradayBarsSyncService
     private readonly IAngelMarketDataClient _angel;
     private readonly IInstrumentRepository _instruments;
     private readonly IMarketDataRepository _market;
+    private readonly TokenSyncService _tokenSync;
     private readonly AngelOptions _angelOptions;
     private readonly ILogger<IntradayBarsSyncService> _logger;
 
@@ -24,12 +25,14 @@ public sealed class IntradayBarsSyncService
         IAngelMarketDataClient angel,
         IInstrumentRepository instruments,
         IMarketDataRepository market,
+        TokenSyncService tokenSync,
         IOptions<AngelOptions> angelOptions,
         ILogger<IntradayBarsSyncService> logger)
     {
         _angel = angel;
         _instruments = instruments;
         _market = market;
+        _tokenSync = tokenSync;
         _angelOptions = angelOptions.Value;
         _logger = logger;
     }
@@ -47,6 +50,7 @@ public sealed class IntradayBarsSyncService
         }
 
         await _angel.EnsureSessionAsync(ct);
+        await _tokenSync.EnsureUniverseTokensMappedAsync(ct);
         var tokens = await _instruments.GetActiveTokensForUniversesAsync(ct);
         if (tokens.Count == 0)
         {

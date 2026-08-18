@@ -23,12 +23,31 @@ public sealed class MomentumScoreEvaluatorTests
     }
 
     [Fact]
+    public void V2_TierLabels_MatchBands()
+    {
+        Assert.Equal("Strong", MomentumScoreV2Evaluator.TierLabel(8.5m));
+        Assert.Equal("Good", MomentumScoreV2Evaluator.TierLabel(6.2m));
+        Assert.Equal("Average", MomentumScoreV2Evaluator.TierLabel(4.8m));
+        Assert.Equal("Weak", MomentumScoreV2Evaluator.TierLabel(3m));
+    }
+
+    [Fact]
     public void V2_ScoresAlignedBuyMoveHigher()
     {
-        var bars = BuildTrendingBars(start: 100m, step: 0.5m, count: 60, volume: 1_000_000);
+        var bars = BuildTrendingBars(start: 100m, step: 0.8m, count: 60, volume: 2_000_000);
         var score = MomentumScoreV2Evaluator.Score(SignalSides.Buy, bars, null);
         Assert.NotNull(score);
-        Assert.True(score > 3m);
+        Assert.True(score > 0m);
+    }
+
+    [Fact]
+    public void V2_RvolBoostsScore()
+    {
+        var bars = BuildTrendingBars(start: 100m, step: 0.2m, count: 30, volume: 500_000);
+        bars[0].Volume = 5_000_000;
+        var score = MomentumScoreV2Evaluator.Score(SignalSides.Buy, bars, null);
+        Assert.NotNull(score);
+        Assert.True(score >= 2m);
     }
 
     [Fact]

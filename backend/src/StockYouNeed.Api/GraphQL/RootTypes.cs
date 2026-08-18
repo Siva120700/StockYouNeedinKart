@@ -16,7 +16,7 @@ public sealed class Query
     public async Task<IReadOnlyList<MarketLtpRow>> Ltp(
         [Service] IMarketDataRepository market,
         CancellationToken ct)
-        => await market.GetAllLtpAsync(ct);
+        => await market.GetUniverseLtpAsync(ct);
 
     public async Task<IReadOnlyList<MarketBarRow>> MarketBars(
         Guid? instrumentId,
@@ -639,6 +639,21 @@ public sealed class Mutation
         try
         {
             return await outcomes.BackfillFromLiveAsync(user.UserId, ct);
+        }
+        catch (Exception ex)
+        {
+            throw new GraphQLException(ex.Message);
+        }
+    }
+
+    /// <summary>Re-seed F&amp;O universe from Angel and refresh NSE tokens (Backtest stock list).</summary>
+    public async Task<int> SyncUniverseTokens(
+        [Service] TokenSyncService tokenSync,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await tokenSync.SyncUniverseTokensAsync(ct);
         }
         catch (Exception ex)
         {

@@ -31,6 +31,7 @@ import {
   type SignalDayEntry,
 } from "../utils/signalDayHistory";
 import TradedDeleteBar from "../zen_components/shared/TradedDeleteBar";
+import { formatMomentumScore, MIN_MOMENTUM_AVERAGE_SCORE, momentumTierLabel } from "../utils/momentumScore";
 
 export type MomentumRuleset = "v2" | "v3";
 type MomentumTab = "active" | "history" | "traded";
@@ -102,7 +103,7 @@ export default function MomentumSignalsPage({
   const exportColumns: ExportColumn<MomentumSignal>[] = useMemo(
     () => [
       { header: "Symbol", value: (r) => r.appSymbol },
-      { header: scoreHeader, value: (r) => r.momentumScore.toFixed(1) },
+      { header: scoreHeader, value: (r) => `${r.momentumScore.toFixed(1)} ${momentumTierLabel(r.momentumScore)}` },
       { header: "Side", value: (r) => (r.side === "sell" ? "SELL" : "BUY") },
       { header: "Entry", value: (r) => r.entryPrice },
       { header: "SL", value: (r) => formatSl(r) },
@@ -139,7 +140,7 @@ export default function MomentumSignalsPage({
     try {
       await ActionFactory.runMomentumAnalysis(ruleset);
       await refresh();
-      setInfo(`Momentum ${ruleset.toUpperCase()} run complete. Only setups with score > ${ruleset === "v3" ? 4 : 5} are saved.`);
+      setInfo(`Momentum ${ruleset.toUpperCase()} run complete.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -177,11 +178,14 @@ export default function MomentumSignalsPage({
 
   const filteredActive = useMemo(() => {
     let list = rows;
+    if (ruleset === "v2") {
+      list = list.filter((r) => r.momentumScore >= MIN_MOMENTUM_AVERAGE_SCORE);
+    }
     if (sectorCheck) list = list.filter((r) => r.sectorConfirmed);
     if (freshCrossCheck) list = list.filter((r) => r.freshCross);
     if (hideLaggingRs) list = list.filter((r) => !r.sectorRs?.downranked);
-    return list;
-  }, [rows, sectorCheck, freshCrossCheck, hideLaggingRs]);
+    return [...list].sort((a, b) => b.momentumScore - a.momentumScore);
+  }, [rows, ruleset, sectorCheck, freshCrossCheck, hideLaggingRs]);
 
   const tableRows: MomentumSignal[] = useMemo(() => {
     if (tab === "history") return historyRows;
@@ -288,12 +292,13 @@ export default function MomentumSignalsPage({
         width: 120,
         getValue: (r) => r.appSymbol,
       }),
-      columnFactories.createNumberColumn<MomentumSignal>({
+      columnFactories.createTextColumn<MomentumSignal>({
         field: "momentumScore",
         headerName: scoreHeader,
-        width: 90,
-        minDecimalPlaces: 1,
+        width: 130,
         getValue: (r) => r.momentumScore,
+        displayRenderer: (v) =>
+          v != null && Number.isFinite(Number(v)) ? formatMomentumScore(Number(v)) : "—",
       }),
       createSectorRsColumn<MomentumSignal>((r) => r.sectorRs),
       columnFactories.createStatusColumn<MomentumSignal>(
@@ -408,8 +413,8 @@ export default function MomentumSignalsPage({
       {info ? <Alert severity="info">{info}</Alert> : null}
       <Alert severity="info" variant="outlined">
         {ruleset === "v3"
-          ? "Jegadeesh–Titman multi-horizon momentum (12–1 / 6–1 / 3–1 + RS vs Nifty). Breakout setups with score > 4 are stored (V2 still uses > 5)."
-          : "StepOne-style composite (RVOL, RS vs Nifty, ATR expansion, EMA trend). Only breakout setups with score > 5 are stored."}
+          ? "Jegadeesh–Titman multi-horizon momentum (12–1 / 6–1 / 3–1 + RS vs Nifty). All scored breakouts are ranked /10."
+          : "StepOne-style composite (trend, returns, RVOL, RSI, ATR breakout, candle strength). Only Average tier and above (score ≥ 4 /10) are shown."}
       </Alert>
       <Tabs value={tab} onChange={(_, v) => setTab(v as MomentumTab)}>
         <Tab value="active" label={`Active (${filteredActive.length})`} />

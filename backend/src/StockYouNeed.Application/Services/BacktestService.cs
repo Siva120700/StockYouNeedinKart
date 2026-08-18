@@ -285,7 +285,13 @@ public sealed class BacktestService
                 ? MomentumScoreV3Evaluator.ScoreSingleStock(signal.Side, window, niftyNewest)
                 : MomentumScoreV2Evaluator.Score(signal.Side, window, niftyNewest, livePrice: null);
 
-            if (score is not decimal s || s <= MomentumAnalysisService.MinScoreForRuleset(strategy))
+            if (score is not decimal s)
+                continue;
+
+            var minScore = useV3
+                ? MomentumAnalysisService.MinMomentumScoreV3
+                : MomentumAnalysisService.MinMomentumScoreV2;
+            if (s < minScore)
                 continue;
 
             aboveScoreFloor++;

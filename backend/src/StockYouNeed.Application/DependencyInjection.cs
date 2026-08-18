@@ -31,6 +31,7 @@ public static class DependencyInjection
         services.AddScoped<Application.SectorScope.SectorScopeService>();
         services.AddScoped<BacktestService>();
         services.AddScoped<UniverseSeedService>();
+        services.AddScoped<FnoUniverseSeedService>();
         services.AddScoped<MarketNewsService>();
         return services;
     }

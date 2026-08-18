@@ -172,6 +172,7 @@ public sealed class SectorScopeService
             "NIFTYPVTBANK" => "PVT BANK",
             "NIFTYHEALTHCARE" => "NIFTY HEALTHCARE",
             "NIFTYCONSUMER" => "NIFTY CONSUMER",
+            "UNLINKED" => "OTHER (F&O)",
             _ => string.IsNullOrWhiteSpace(name) ? symbol : name.ToUpperInvariant(),
         };
     }

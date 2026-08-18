@@ -6,7 +6,7 @@ export type LtpQuote = {
   instrumentName: string;
   exchange: string;
   ltp: number;
-  fetchedAt: string;
+  fetchedAt: string | null;
 };
 
 export type Signal = {

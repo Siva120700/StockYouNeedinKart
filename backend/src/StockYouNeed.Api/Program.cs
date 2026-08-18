@@ -67,19 +67,24 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// Don't block Kestrel on Angel token sync (can hang offline / rate-limit).
+// F&O + token sync in background — Angel scrip master is large; never block Kestrel startup.
 _ = Task.Run(async () =>
 {
     try
     {
         await using var scope = app.Services.CreateAsyncScope();
+        var log = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("StartupBackground");
+        log.LogInformation(
+            "Background sync starting (F&O universe + Angel tokens). API is ready — stock list grows when this finishes.");
+
         var tokenSync = scope.ServiceProvider.GetRequiredService<TokenSyncService>();
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        await tokenSync.SyncUniverseTokensAsync(cts.Token);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var matched = await tokenSync.SyncUniverseTokensAsync(cts.Token);
+        log.LogInformation("Background sync complete: {Matched} Angel tokens mapped.", matched);
     }
     catch (Exception ex)
     {
-        app.Logger.LogWarning(ex, "Background token sync skipped/failed.");
+        app.Logger.LogWarning(ex, "Background F&O/token sync failed — use Backtest → Refresh stocks to retry.");
     }
 });
 

@@ -14,9 +14,10 @@ namespace StockYouNeed.Application.Services;
 /// </summary>
 public sealed class MomentumAnalysisService
 {
-    public const decimal MinMomentumScoreV2 = 5m;
-    /// <summary>V3 cross-section ranks are tighter — slightly lower store floor.</summary>
-    public const decimal MinMomentumScoreV3 = 4m;
+    /// <summary>V2 stores Average tier and above only (score ≥ 4 /10 — 🟡🟢🔥).</summary>
+    public const decimal MinMomentumScoreV2 = 4m;
+    /// <summary>V3 ranks all scored breakouts — same as V2 (tier labels filter visually).</summary>
+    public const decimal MinMomentumScoreV3 = 0m;
 
     public static decimal MinScoreForRuleset(string? ruleset)
         => NormalizeRuleset(ruleset) == "v3" ? MinMomentumScoreV3 : MinMomentumScoreV2;
@@ -28,6 +29,7 @@ public sealed class MomentumAnalysisService
     private readonly IMarketDataRepository _market;
     private readonly IPortfolioRepository _portfolio;
     private readonly MarketBarsSyncService _barsSync;
+    private readonly IntradayBarsSyncService _intradaySync;
     private readonly TokenSyncService _tokenSync;
     private readonly UniverseSeedService _universeSeed;
     private readonly SignalOutcomeService _outcomes;
@@ -39,6 +41,7 @@ public sealed class MomentumAnalysisService
         IMarketDataRepository market,
         IPortfolioRepository portfolio,
         MarketBarsSyncService barsSync,
+        IntradayBarsSyncService intradaySync,
         TokenSyncService tokenSync,
         UniverseSeedService universeSeed,
         SignalOutcomeService outcomes,
@@ -49,6 +52,7 @@ public sealed class MomentumAnalysisService
         _market = market;
         _portfolio = portfolio;
         _barsSync = barsSync;
+        _intradaySync = intradaySync;
         _tokenSync = tokenSync;
         _universeSeed = universeSeed;
         _outcomes = outcomes;
@@ -83,6 +87,13 @@ public sealed class MomentumAnalysisService
 
         try
         {
+            if (_options.Enabled)
+            {
+                await _tokenSync.EnsureUniverseTokensMappedAsync(ct);
+                if (ruleset == "v3")
+                    await _barsSync.EnsureMomentumDailyHistoryAsync(ct);
+            }
+
             var tokens = await _instruments.GetActiveTokensForUniversesAsync(ct);
             var watchlistIds = includeWatchlist
                 ? await _portfolio.GetWatchlistInstrumentIdsAsync(userId, ct)
@@ -109,6 +120,8 @@ public sealed class MomentumAnalysisService
             var lowMomentum = 0;
             var sectorConfirmedCount = 0;
 
+            var pendingRows = new List<MomentumSignalRow>();
+
             foreach (var instrumentId in instrumentIds)
             {
                 if (!universeBars.TryGetValue(instrumentId, out var bars) || bars.Count < 5)
@@ -134,12 +147,25 @@ public sealed class MomentumAnalysisService
                 if (sectorConfirmed)
                     sectorConfirmedCount++;
 
-                var score = ruleset == "v3"
-                    ? MomentumScoreV3Evaluator.Score(
-                        breakout.Side, instrumentId, bars, niftyBars, pct12, pct6, pct3, liquidityPct)
-                    : MomentumScoreV2Evaluator.Score(breakout.Side, bars, niftyBars, livePrice: null);
+                decimal? score;
+                if (ruleset == "v3")
+                {
+                    score = MomentumScoreV3Evaluator.Score(
+                        breakout.Side, instrumentId, bars, niftyBars, pct12, pct6, pct3, liquidityPct);
+                }
+                else
+                {
+                    var bars1h = (await _market.GetIntradayBarsForInstrumentAsync(
+                        instrumentId, IntradayBarsSyncService.Interval1h, 120, ct)).ToList();
+                    score = MomentumScoreV2Evaluator.Score(
+                        breakout.Side, bars, niftyBars, livePrice: null,
+                        new MomentumScoreV2Evaluator.IntradayContext
+                        {
+                            Bars1hNewestFirst = bars1h,
+                        });
+                }
 
-                if (score is not decimal s || s <= MinScoreForRuleset(ruleset))
+                if (score is not decimal s || s < MinScoreForRuleset(ruleset))
                 {
                     lowMomentum++;
                     continue;
@@ -166,6 +192,11 @@ public sealed class MomentumAnalysisService
                     MomentumScore = s,
                 };
 
+                pendingRows.Add(row);
+            }
+
+            foreach (var row in pendingRows.OrderByDescending(r => r.MomentumScore))
+            {
                 await _portfolio.InsertMomentumSignalAsync(row, ct);
                 await _outcomes.OpenFromMomentumAsync(row, ruleset, ct);
                 signalCount++;
@@ -238,7 +269,17 @@ public sealed class MomentumAnalysisService
         }
 
         var niftyBars = await LoadNiftyDailyBarsAsync(ct);
-        var v2Score = MomentumScoreV2Evaluator.Score(breakout.Side, bars, niftyBars, livePrice);
+        var bars1h = (await _market.GetIntradayBarsForInstrumentAsync(
+            instrumentId, IntradayBarsSyncService.Interval1h, 120, ct)).ToList();
+        var bars15m = (await _market.GetIntradayBarsForInstrumentAsync(
+            instrumentId, "15m", 120, ct)).ToList();
+        var v2Score = MomentumScoreV2Evaluator.Score(
+            breakout.Side, bars, niftyBars, livePrice,
+            new MomentumScoreV2Evaluator.IntradayContext
+            {
+                Bars1hNewestFirst = bars1h,
+                Bars15mNewestFirst = bars15m.Count > 0 ? bars15m : null,
+            });
         var v3Score = MomentumScoreV3Evaluator.ScoreSingleStock(breakout.Side, bars, niftyBars);
 
         return (

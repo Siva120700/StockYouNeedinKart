@@ -14,6 +14,25 @@ public static class MomentumScoreHelpers
     public static List<MarketBarRow> ToChronological(IReadOnlyList<MarketBarRow> newestFirst)
         => newestFirst.OrderBy(b => b.TradeDate).ToList();
 
+    /// <summary>Map intraday bars to daily-like rows for RSI/EMA (BarTime → TradeDate).</summary>
+    public static List<MarketBarRow> ToChronological(IReadOnlyList<MarketIntradayBarRow> newestFirst)
+    {
+        return newestFirst
+            .OrderBy(b => b.BarTime)
+            .Select(b => new MarketBarRow
+            {
+                InstrumentId = b.InstrumentId,
+                AppSymbol = b.AppSymbol,
+                TradeDate = DateOnly.FromDateTime(b.BarTime.ToOffset(TimeSpan.FromHours(5.5)).DateTime),
+                Open = b.Open,
+                High = b.High,
+                Low = b.Low,
+                Close = b.Close,
+                Volume = b.Volume,
+            })
+            .ToList();
+    }
+
     /// <summary>Return from <paramref name="startBarsAgo"/> to <paramref name="endBarsAgo"/> (bars ago from latest).</summary>
     public static decimal? ReturnBetween(IReadOnlyList<MarketBarRow> chron, int endBarsAgo, int startBarsAgo)
     {

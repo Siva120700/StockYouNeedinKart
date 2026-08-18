@@ -15,6 +15,7 @@ import { DataFactory } from "../../api/factories";
 import type { UniverseInstrument } from "../../api/types";
 import { useZenPrimaryLayoutContext } from "../../zen_components/layout/ZenPrimaryLayoutProvider";
 import { DEFAULT_SMALL_ICON_SIZE } from "../../constants";
+import { formatMomentumScore } from "../../utils/momentumScore";
 import { AnalyzeStockApi } from "./api";
 import { buildNextMoveSections } from "./nextMove";
 import {
@@ -529,7 +530,7 @@ export default function AnalyzeStockPage() {
                 label="Momentum V2"
                 value={
                   result.momentumV2
-                    ? `${result.momentumV2.momentumScore.toFixed(1)}/10 · ${result.momentumV2.side.toUpperCase()}`
+                    ? `${formatMomentumScore(result.momentumV2.momentumScore)} · ${result.momentumV2.side.toUpperCase()}`
                     : "—"
                 }
               />
@@ -549,7 +550,6 @@ export default function AnalyzeStockPage() {
                     V2: entry {fmt(result.momentumV2.entryPrice)} · SL{" "}
                     {fmt(result.momentumV2.initialStopLoss)} · T1 {fmt(result.momentumV2.targetT1)} · T2{" "}
                     {fmt(result.momentumV2.targetT2)} · T3 {fmt(result.momentumV2.targetT3)}
-                    {result.momentumV2.momentumScore <= 5 ? " · below V2 store threshold (>5)" : ""}
                   </Typography>
                 )}
                 {result.momentumV3 && (

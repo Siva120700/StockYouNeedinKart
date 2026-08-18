@@ -112,6 +112,8 @@ public interface IInstrumentRepository
     Task EnsureUniverseMembershipAsync(string universe, string symbol, CancellationToken ct = default);
     /// <summary>Deactivate old symbols (e.g. LTIM→LTM) and end their universe memberships.</summary>
     Task RetireEquitySymbolsAsync(IReadOnlyList<string> symbols, CancellationToken ct = default);
+    /// <summary>Retire equities whose symbol matches a SQL ILIKE pattern (e.g. %NSETEST%).</summary>
+    Task RetireEquitySymbolsLikeAsync(string symbolPattern, CancellationToken ct = default);
     Task SeedSectorIndexIfMissingAsync(string symbol, string name, CancellationToken ct = default);
     Task LinkEquityToSectorAsync(string equitySymbol, string sectorSymbol, CancellationToken ct = default);
     Task<IReadOnlyList<Instrument>> GetSectorIndexesAsync(CancellationToken ct = default);
@@ -130,6 +132,8 @@ public interface IMarketDataRepository
     Task UpsertIntradayBarAsync(Guid instrumentId, string interval, DateTimeOffset barTime, decimal open, decimal high, decimal low, decimal close, long volume, CancellationToken ct = default);
     Task TrimMarketBarsOlderThanAsync(int keepTradingDaysApprox, CancellationToken ct = default);
     Task<IReadOnlyList<MarketLtpRow>> GetAllLtpAsync(CancellationToken ct = default);
+    /// <summary>Full Nifty + F&amp;O universe with optional cached LTP (LEFT JOIN market_ltp).</summary>
+    Task<IReadOnlyList<MarketLtpRow>> GetUniverseLtpAsync(CancellationToken ct = default);
     Task<IReadOnlyList<SectorScopeQuoteRow>> GetSectorScopeQuotesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<MarketBarRow>> GetBarsAsync(Guid? instrumentId, int limitDays, CancellationToken ct = default);
     Task<IReadOnlyList<MarketBarRow>> GetBarsForInstrumentAsync(Guid instrumentId, int limitDays, CancellationToken ct = default);

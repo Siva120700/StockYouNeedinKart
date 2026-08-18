@@ -53,6 +53,7 @@ public sealed class DatabaseMigrator
             Path.Combine(databaseRoot, "028_nifty_breakout_chain.sql"),
             Path.Combine(databaseRoot, "029_momentum_scores.sql"),
             Path.Combine(databaseRoot, "030_momentum_strategies.sql"),
+            Path.Combine(databaseRoot, "031_nifty_fno_universe.sql"),
         };
 
         await using var conn = new NpgsqlConnection(_db.ConnectionString);
@@ -91,6 +92,27 @@ public sealed class DatabaseMigrator
             }
 
             var sql = await File.ReadAllTextAsync(file, ct);
+            // ALTER TYPE ... ADD VALUE cannot run inside a transaction on some PG versions.
+            var noTx = name is "031_nifty_fno_universe.sql";
+            if (noTx)
+            {
+                await using (var apply = new NpgsqlCommand(sql, conn))
+                {
+                    apply.CommandTimeout = 120;
+                    await apply.ExecuteNonQueryAsync(ct);
+                }
+
+                await using (var mark = new NpgsqlCommand(
+                                 "INSERT INTO schema_migrations (filename) VALUES (@n)", conn))
+                {
+                    mark.Parameters.AddWithValue("n", name);
+                    await mark.ExecuteNonQueryAsync(ct);
+                }
+
+                _logger.LogInformation("Applied migration {File} (no transaction)", name);
+                continue;
+            }
+
             await using var tx = await conn.BeginTransactionAsync(ct);
             try
             {

@@ -18,17 +18,20 @@ public sealed class TokenSyncService
 
     private readonly IAngelMarketDataClient _angel;
     private readonly IInstrumentRepository _instruments;
+    private readonly FnoUniverseSeedService _fnoSeed;
     private readonly AngelOptions _options;
     private readonly ILogger<TokenSyncService> _logger;
 
     public TokenSyncService(
         IAngelMarketDataClient angel,
         IInstrumentRepository instruments,
+        FnoUniverseSeedService fnoSeed,
         IOptions<AngelOptions> options,
         ILogger<TokenSyncService> logger)
     {
         _angel = angel;
         _instruments = instruments;
+        _fnoSeed = fnoSeed;
         _options = options.Value;
         _logger = logger;
     }
@@ -41,10 +44,11 @@ public sealed class TokenSyncService
             return 0;
         }
 
+        await _fnoSeed.SeedFromAngelAsync(ct);
         var equities = await _instruments.GetUniverseEquitiesAsync(ct);
         if (equities.Count == 0)
         {
-            _logger.LogWarning("No universe equities found. Seed Nifty symbols first.");
+            _logger.LogWarning("No universe equities found. Seed Nifty / F&O symbols first.");
             return 0;
         }
 
@@ -187,5 +191,23 @@ public sealed class TokenSyncService
             "Token sync matched equities {Matched}/{Total}, sectors {SectorMatched}/{SectorTotal}.",
             matched, equities.Count, sectorMatched, sectors.Count);
         return matched + sectorMatched;
+    }
+
+    /// <summary>
+    /// Maps Angel tokens when the DB has fewer tokens than universe equities (e.g. after F&amp;O seed).
+    /// </summary>
+    public async Task EnsureUniverseTokensMappedAsync(CancellationToken ct = default)
+    {
+        if (!_options.Enabled)
+            return;
+
+        var need = (await _instruments.GetUniverseEquitiesAsync(ct)).Count;
+        var have = (await _instruments.GetActiveTokensForUniversesAsync(ct)).Count;
+        if (have >= need)
+            return;
+
+        _logger.LogInformation(
+            "Angel token gap {Have}/{Need} — syncing universe tokens (Nifty + F&amp;O)…", have, need);
+        await SyncUniverseTokensAsync(ct);
     }
 }

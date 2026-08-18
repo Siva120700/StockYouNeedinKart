@@ -89,7 +89,7 @@ public sealed class MarketLtpRow
     public string TradingSymbol { get; set; } = "";
     public string SymbolToken { get; set; } = "";
     public decimal Ltp { get; set; }
-    public DateTimeOffset FetchedAt { get; set; }
+    public DateTimeOffset? FetchedAt { get; set; }
 }
 
 public sealed class MarketBarRow

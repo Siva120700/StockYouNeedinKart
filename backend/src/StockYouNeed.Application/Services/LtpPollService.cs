@@ -12,6 +12,7 @@ public sealed class LtpPollService
     private readonly IAngelMarketDataClient _angel;
     private readonly IInstrumentRepository _instruments;
     private readonly IMarketDataRepository _market;
+    private readonly TokenSyncService _tokenSync;
     private readonly AngelOptions _options;
     private readonly ILogger<LtpPollService> _logger;
 
@@ -19,12 +20,14 @@ public sealed class LtpPollService
         IAngelMarketDataClient angel,
         IInstrumentRepository instruments,
         IMarketDataRepository market,
+        TokenSyncService tokenSync,
         IOptions<AngelOptions> options,
         ILogger<LtpPollService> logger)
     {
         _angel = angel;
         _instruments = instruments;
         _market = market;
+        _tokenSync = tokenSync;
         _options = options.Value;
         _logger = logger;
     }
@@ -35,6 +38,7 @@ public sealed class LtpPollService
             return 0;
 
         await _angel.EnsureSessionAsync(ct);
+        await _tokenSync.EnsureUniverseTokensMappedAsync(ct);
         var tokens = await _instruments.GetActiveTokensForUniversesAsync(ct);
         if (tokens.Count == 0)
             return 0;

@@ -61,12 +61,15 @@ public sealed class AnalysisRunService
 
         try
         {
+            if (_options.Enabled)
+                await _tokenSync.EnsureUniverseTokensMappedAsync(ct);
+
             var tokens = await _instruments.GetActiveTokensForUniversesAsync(ct);
             var watchlistIds = includeWatchlist
                 ? await _portfolio.GetWatchlistInstrumentIdsAsync(userId, ct)
                 : Array.Empty<Guid>();
 
-            // Filter by requested universes is already embedded in token query (both nifty_50/100).
+            // Filter by requested universes is already embedded in token query (Nifty 50/100 + F&O).
             // Optionally narrow to watchlist-only extras: tokens already cover index; watchlist still scanned from bars.
             var instrumentIds = tokens.Select(t => t.InstrumentId).ToHashSet();
             foreach (var id in watchlistIds)

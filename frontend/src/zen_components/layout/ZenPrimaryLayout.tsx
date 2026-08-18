@@ -17,6 +17,7 @@ import { useZenPrimaryLayoutContext } from "./ZenPrimaryLayoutProvider";
 import LeftPanel from "./LeftPanel";
 import ZenBreadcrumbs from "../shared/ZenBreadcrumbs";
 import ZenSyncStatusIcon from "../shared/ZenSyncStatusIcon";
+import IstLiveClock from "../shared/IstLiveClock";
 import IndexOptionNotificationBell from "./IndexOptionNotificationBell";
 import {
   DEFAULT_ICON_SIZE,
@@ -373,6 +374,7 @@ const ZenPrimaryLayout: React.FC<ZenPrimaryLayoutProps> = ({ children }) => {
                 </Stack>
                 <Stack direction="row" spacing={1} alignItems="center">
                   {breadcrumbActions}
+                  <IstLiveClock />
                   <IndexOptionNotificationBell />
                   <ZenSyncStatusIcon isSyncing={isSyncing} />
                 </Stack>

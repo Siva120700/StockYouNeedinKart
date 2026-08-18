@@ -96,6 +96,9 @@ public sealed class LiquidityAnalysisService
 
         try
         {
+            if (_options.Enabled)
+                await _tokenSync.EnsureUniverseTokensMappedAsync(ct);
+
             var upserted = await _intradaySync.SyncUniverseHourlyAsync(ct);
             stats["intradayBarsUpserted"] = upserted;
 

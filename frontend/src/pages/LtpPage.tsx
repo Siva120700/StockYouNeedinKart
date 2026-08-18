@@ -17,6 +17,12 @@ export default function LtpPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+
+  const liveCount = useMemo(
+    () => rows.filter((r) => r.ltp > 0 && r.fetchedAt).length,
+    [rows],
+  );
 
   async function loadCached() {
     setError(null);
@@ -31,14 +37,21 @@ export default function LtpPage() {
     }
   }
 
-  /** Calls Angel via API, then reloads the table. */
+  /** Sync Angel tokens for full universe, fetch LTP, then reload the table. */
   async function refreshFromAngel() {
     setError(null);
+    setInfo(null);
     setRefreshing(true);
     setIsSyncing(true);
     try {
-      await ActionFactory.refreshLtp();
-      setRows(await DataFactory.ltp());
+      const tokens = await ActionFactory.syncUniverseTokens();
+      const updated = await ActionFactory.refreshLtp();
+      const next = await DataFactory.ltp();
+      setRows(next);
+      const live = next.filter((r) => r.ltp > 0 && r.fetchedAt).length;
+      setInfo(
+        `${next.length} symbols · ${live} with live LTP (${tokens} Angel tokens mapped, ${updated} quotes updated).`,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -49,7 +62,10 @@ export default function LtpPage() {
   }
 
   useEffect(() => {
-    setTitle("Live LTP");
+    setTitle(`Live LTP (${liveCount}/${rows.length || "…"})`);
+  }, [liveCount, rows.length, setTitle]);
+
+  useEffect(() => {
     setBreadcrumbs([{ label: "Home" }, { label: "Live LTP" }]);
     void loadCached();
     // Light re-read of DB every 15s (Worker also writes during market hours).
@@ -101,13 +117,16 @@ export default function LtpPage() {
         headerName: "LTP",
         width: 110,
         minDecimalPlaces: 2,
-        getValue: (r) => r.ltp,
+        getValue: (r) => (r.ltp > 0 ? r.ltp : null),
+        displayRenderer: (v) =>
+          v != null && Number(v) > 0 ? Number(v).toFixed(2) : "—",
       }),
       columnFactories.createDateTimeColumn<LtpQuote>({
         field: "fetchedAt",
         headerName: "As of",
         width: 180,
         getValue: (r) => r.fetchedAt,
+        displayRenderer: (v) => (v ? String(v) : "—"),
       }),
     ],
     [],
@@ -120,6 +139,11 @@ export default function LtpPage() {
           {error}
         </Alert>
       ) : null}
+      {info ? (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setInfo(null)}>
+          {info}
+        </Alert>
+      ) : null}
       <ZenTable
         columns={columns}
         rows={rows}
@@ -127,7 +151,7 @@ export default function LtpPage() {
         loading={loading}
         enableSearch
         searchPlaceholder="Search symbol or name…"
-        emptyMessage="No LTP yet — click Refresh (Angel Enabled=true)."
+        emptyMessage="No symbols in universe — restart API to seed F&O."
       />
     </>
   );

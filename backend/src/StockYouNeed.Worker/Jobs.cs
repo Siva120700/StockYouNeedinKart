@@ -61,6 +61,8 @@ public sealed class DailySyncHostedService : BackgroundService
         _logger.LogInformation("Starting daily seed + token + 10-day bars sync…");
         await instruments.EnsureDemoUserAsync(auth.DemoUserId, auth.DemoEmail, auth.DemoDisplayName, ct);
         await seed.SeedAsync(ct);
+        var fnoSeed = scope.ServiceProvider.GetRequiredService<FnoUniverseSeedService>();
+        await fnoSeed.SeedFromAngelAsync(ct);
         await tokens.SyncUniverseTokensAsync(ct);
         await bars.SyncLastNTradingDaysAsync(ct);
 
