@@ -60,6 +60,94 @@ public sealed class SectorScopeStock
     public decimal? Ltp { get; set; }
 }
 
+/// <summary>Equity mapped to its Nifty sector index.</summary>
+public sealed class EquitySectorRow
+{
+    public Guid InstrumentId { get; set; }
+    public string Symbol { get; set; } = "";
+    public string Name { get; set; } = "";
+    public Guid SectorInstrumentId { get; set; }
+    public string SectorSymbol { get; set; } = "";
+    public string SectorName { get; set; } = "";
+}
+
+public sealed class SectorRotationSnapshot
+{
+    public DateTimeOffset AsOf { get; set; }
+    public MarketRegimeInfo Regime { get; set; } = new();
+    public IReadOnlyList<SectorRotationRow> Sectors { get; set; } = Array.Empty<SectorRotationRow>();
+    public IReadOnlyList<SectorRotationRow> CapitalEntering { get; set; } = Array.Empty<SectorRotationRow>();
+    public IReadOnlyList<SectorRotationRow> Leading { get; set; } = Array.Empty<SectorRotationRow>();
+    public IReadOnlyList<SectorRotationRow> Neutral { get; set; } = Array.Empty<SectorRotationRow>();
+    public IReadOnlyList<SectorRotationRow> CapitalLeaving { get; set; } = Array.Empty<SectorRotationRow>();
+    /// <summary>Sectors with early rotation signals (flow accel, volume, RS building) before they lead.</summary>
+    public IReadOnlyList<SectorRotationRow> MomentumBuilding { get; set; } = Array.Empty<SectorRotationRow>();
+    public IReadOnlyList<SectorRotationStockRow> AllStocks { get; set; } = Array.Empty<SectorRotationStockRow>();
+}
+
+public sealed class MarketRegimeInfo
+{
+    public string Label { get; set; } = "neutral";
+    public decimal? NiftyChangePct { get; set; }
+    public decimal? NiftyReturn5dPct { get; set; }
+    public bool NiftyAboveEma20 { get; set; }
+    public decimal MarketBreadthPct { get; set; }
+    public int Advancers { get; set; }
+    public int Decliners { get; set; }
+    public IReadOnlyList<string> Reasons { get; set; } = Array.Empty<string>();
+}
+
+public sealed class SectorRotationRow
+{
+    public Guid SectorInstrumentId { get; set; }
+    public string Symbol { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string Bucket { get; set; } = "neutral";
+    public int Score { get; set; }
+    public int Rank { get; set; }
+    public decimal FlowZScore { get; set; }
+    public decimal FlowAccelerationPct { get; set; }
+    public decimal RelativeStrength5dPct { get; set; }
+    public decimal BreadthPct { get; set; }
+    public int TrendScore { get; set; }
+    public decimal VolumeExpansionPct { get; set; }
+    public decimal TodayFlowCr { get; set; }
+    public int ConstituentCount { get; set; }
+    /// <summary>0–100 early-rotation score (accel, volume, flow turn, RS building).</summary>
+    public int UpcomingMomentumScore { get; set; }
+    public IReadOnlyList<string> UpcomingMomentumReasons { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<SectorRotationStockRow> TopStocks { get; set; } = Array.Empty<SectorRotationStockRow>();
+}
+
+public sealed class SectorRotationStockRow
+{
+    public Guid InstrumentId { get; set; }
+    public string Symbol { get; set; } = "";
+    public string Name { get; set; } = "";
+    public int MomentumScore { get; set; }
+    public string Alignment { get; set; } = "neutral";
+    public decimal ChangePct { get; set; }
+    public decimal Return5dPct { get; set; }
+    public decimal FlowCr { get; set; }
+    public Guid SectorInstrumentId { get; set; }
+    public string SectorSymbol { get; set; } = "";
+    public int SectorScore { get; set; }
+    public string SectorBucket { get; set; } = "neutral";
+}
+
+/// <summary>Live sector-rotation overlay on equity rows (not persisted).</summary>
+public sealed class SectorRotationInfo
+{
+    public string? SectorSymbol { get; set; }
+    public string? SectorName { get; set; }
+    public int SectorScore { get; set; }
+    public int StockMomentumScore { get; set; }
+    public string Alignment { get; set; } = "neutral";
+    public string Bucket { get; set; } = "neutral";
+    public int? BlendedScore { get; set; }
+    public bool Downranked { get; set; }
+}
+
 public sealed class Instrument
 {
     public Guid Id { get; set; }
@@ -197,6 +285,7 @@ public sealed class AnalysisSignalRow : ISectorRanked
     public decimal? Last2dHigh { get; set; }
     public decimal? Last2dLow { get; set; }
     public SectorRelativeStrengthInfo? SectorRs { get; set; }
+    public SectorRotationInfo? SectorRotation { get; set; }
 }
 
 public sealed class MomentumSignalRow : ISectorRanked
@@ -396,6 +485,7 @@ public sealed class TradeConfidenceScoreRow : ISectorRanked
     public decimal? BreakoutAdx { get; set; }
     public decimal? BreakoutRsi { get; set; }
     public SectorRelativeStrengthInfo? SectorRs { get; set; }
+    public SectorRotationInfo? SectorRotation { get; set; }
 }
 
 public sealed class OpenPositionRow

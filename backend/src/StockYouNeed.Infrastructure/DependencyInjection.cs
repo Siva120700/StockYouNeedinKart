@@ -18,6 +18,7 @@ public static class DependencyInjection
     {
         SqlMapper.AddTypeHandler(new DateOnlyTypeHandler());
         SqlMapper.AddTypeHandler(new SectorRelativeStrengthInfoTypeHandler());
+        SqlMapper.AddTypeHandler(new SectorRotationInfoTypeHandler());
 
         services.Configure<DatabaseOptions>(configuration.GetSection(DatabaseOptions.SectionName));
         services.Configure<AngelOptions>(configuration.GetSection(AngelOptions.SectionName));

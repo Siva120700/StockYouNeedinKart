@@ -1,4 +1,5 @@
 import type { SectorRelativeStrength } from "../utils/sectorRelativeStrength.tsx";
+import type { SectorRotationOverlay } from "../utils/sectorRotation.tsx";
 
 export type LtpQuote = {
   instrumentId: string;
@@ -25,6 +26,7 @@ export type Signal = {
   sectorConfirmed: boolean;
   freshCross: boolean;
   sectorRs?: SectorRelativeStrength | null;
+  sectorRotation?: SectorRotationOverlay | null;
 };
 
 export type MomentumSignal = {

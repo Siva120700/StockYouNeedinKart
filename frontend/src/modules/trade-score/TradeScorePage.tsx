@@ -28,6 +28,7 @@ import {
   type HitRateByInstrument,
 } from "../../utils/historicalHitRate";
 import { createSectorRsColumn } from "../../utils/sectorRelativeStrength.tsx";
+import { createSectorRotationColumn } from "../../utils/sectorRotation.tsx";
 import {
   formatIstTime,
   isSignalDayTraded,
@@ -238,6 +239,7 @@ export default function TradeScorePage() {
         getValue: (r) => r.appSymbol,
       }),
       createSectorRsColumn<TradeConfidenceScore>((r) => r.sectorRs),
+      createSectorRotationColumn<TradeConfidenceScore>((r) => r.sectorRotation),
       createHistoricalHitRateColumn<TradeConfidenceScore>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<TradeConfidenceScore>(
         {

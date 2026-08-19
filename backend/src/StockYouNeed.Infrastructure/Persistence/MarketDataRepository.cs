@@ -328,6 +328,50 @@ public sealed class MarketDataRepository : IMarketDataRepository
         return rows.ToList();
     }
 
+    public async Task<IReadOnlyList<MarketBarRow>> GetDailyBarsForInstrumentsAsync(
+        IReadOnlyList<Guid> instrumentIds, int limitDaysPerInstrument, CancellationToken ct = default)
+    {
+        if (instrumentIds.Count == 0 || limitDaysPerInstrument <= 0)
+            return Array.Empty<MarketBarRow>();
+
+        const string sql = """
+            WITH ranked AS (
+              SELECT
+                b.instrument_id,
+                b.trade_date,
+                b.open,
+                b.high,
+                b.low,
+                b.close,
+                b.volume,
+                b.source,
+                ROW_NUMBER() OVER (PARTITION BY b.instrument_id ORDER BY b.trade_date DESC) AS rn
+              FROM market_bars b
+              WHERE b.instrument_id = ANY(@instrumentIds)
+            )
+            SELECT
+              r.instrument_id AS InstrumentId,
+              i.symbol AS AppSymbol,
+              r.trade_date AS TradeDate,
+              r.open AS Open,
+              r.high AS High,
+              r.low AS Low,
+              r.close AS Close,
+              r.volume AS Volume,
+              r.source AS Source
+            FROM ranked r
+            JOIN instruments i ON i.id = r.instrument_id
+            WHERE r.rn <= @limitDaysPerInstrument
+            ORDER BY r.instrument_id, r.trade_date DESC
+            """;
+        using var conn = _db.CreateConnection();
+        var rows = await conn.QueryAsync<MarketBarRow>(new CommandDefinition(
+            sql,
+            new { instrumentIds = instrumentIds.ToArray(), limitDaysPerInstrument },
+            cancellationToken: ct));
+        return rows.ToList();
+    }
+
     public async Task<IReadOnlyList<MarketIntradayBarRow>> GetIntradayBarsForInstrumentAsync(
         Guid instrumentId, string interval, int limitBars, CancellationToken ct = default)
     {

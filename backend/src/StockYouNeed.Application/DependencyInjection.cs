@@ -30,6 +30,7 @@ public static class DependencyInjection
         services.AddScoped<TradeConfidenceService>();
         services.AddScoped<AnalyzeStockService>();
         services.AddScoped<Application.SectorScope.SectorScopeService>();
+        services.AddScoped<Application.SectorRotation.SectorRotationService>();
         services.AddScoped<SpikeScanService>();
         services.AddScoped<BacktestService>();
         services.AddScoped<UniverseSeedService>();

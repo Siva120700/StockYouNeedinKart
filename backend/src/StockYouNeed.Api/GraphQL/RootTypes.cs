@@ -35,11 +35,14 @@ public sealed class Query
         [Service] ICurrentUserAccessor user,
         [Service] IPortfolioRepository portfolio,
         [Service] Application.SectorScope.SectorScopeService sectorScope,
+        [Service] Application.SectorRotation.SectorRotationService sectorRotation,
         CancellationToken ct)
     {
         try
         {
-            return await sectorScope.RankAsync(await portfolio.GetSignalsAsync(user.UserId, runId, ct), ct);
+            var rows = await portfolio.GetSignalsAsync(user.UserId, runId, ct);
+            rows = await sectorScope.RankAsync(rows, ct);
+            return await sectorRotation.ApplyToSignalsAsync(rows, ct);
         }
         catch (Exception ex)
         {
@@ -100,8 +103,17 @@ public sealed class Query
         [Service] ICurrentUserAccessor user,
         [Service] TradeConfidenceService tradeScore,
         [Service] Application.SectorScope.SectorScopeService sectorScope,
+        [Service] Application.SectorRotation.SectorRotationService sectorRotation,
         CancellationToken ct)
-        => await sectorScope.RankAsync(await tradeScore.GetScoresAsync(user.UserId, runId, ct), ct);
+    {
+        var rows = await sectorScope.RankAsync(await tradeScore.GetScoresAsync(user.UserId, runId, ct), ct);
+        return await sectorRotation.ApplyToTradeScoresAsync(rows, ct);
+    }
+
+    public async Task<SectorRotationSnapshot> SectorRotation(
+        [Service] Application.SectorRotation.SectorRotationService sectorRotation,
+        CancellationToken ct)
+        => await sectorRotation.GetSnapshotAsync(ct);
 
     public async Task<AnalyzeStockResult> AnalyzeStock(
         Guid instrumentId,

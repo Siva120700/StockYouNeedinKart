@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import {
   ChartLine,
+  ChartPieSlice,
   Drop,
   Lightning,
   ListChecks,
@@ -28,6 +29,7 @@ import { DEFAULT_ICON_SIZE } from "../../constants";
 const navItems = [
   { to: "/ltp", label: "Live LTP", icon: Pulse },
   { to: "/sector-scope", label: "Sector Scope", icon: SquaresFour },
+  { to: "/sector-rotation", label: "Sector Intelligence", icon: ChartPieSlice },
   { to: "/analyze", label: "Analyze Stock", icon: MagnifyingGlass },
   { to: "/news", label: "News", icon: Newspaper },
   { to: "/signals", label: "Signals", icon: ChartLine },

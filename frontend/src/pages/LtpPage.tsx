@@ -11,6 +11,23 @@ import {
 import PageFrame, { TablePane } from "../zen_components/layout/PageFrame";
 import { DEFAULT_SMALL_ICON_SIZE } from "../constants";
 
+function fmtFetchedAtIst(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "—";
+  }
+}
+
 export default function LtpPage() {
   const { setTitle, setBreadcrumbs, setPageActions, setIsSyncing } =
     useZenPrimaryLayoutContext();
@@ -124,10 +141,10 @@ export default function LtpPage() {
       }),
       columnFactories.createDateTimeColumn<LtpQuote>({
         field: "fetchedAt",
-        headerName: "As of",
-        width: 180,
+        headerName: "As of (IST)",
+        width: 160,
         getValue: (r) => r.fetchedAt,
-        displayRenderer: (v) => (v ? String(v) : "—"),
+        displayRenderer: (v) => fmtFetchedAtIst(v ? String(v) : null),
       }),
     ],
     [],

@@ -30,6 +30,7 @@ import {
   type HitRateByInstrument,
 } from "../utils/historicalHitRate";
 import { createSectorRsColumn } from "../utils/sectorRelativeStrength.tsx";
+import { createSectorRotationColumn } from "../utils/sectorRotation.tsx";
 import {
   isSignalDayTraded,
   markSignalDayTraded,
@@ -340,6 +341,7 @@ export default function SignalsPage() {
         getValue: (r) => r.appSymbol,
       }),
       createSectorRsColumn<Signal>((r) => r.sectorRs),
+      createSectorRotationColumn<Signal>((r) => r.sectorRotation),
       createHistoricalHitRateColumn<Signal>(hitRates, (r) => r.instrumentId),
       columnFactories.createStatusColumn<Signal>(
         {

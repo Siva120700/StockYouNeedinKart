@@ -220,6 +220,30 @@ public sealed class InstrumentRepository : IInstrumentRepository
         return rows.ToList();
     }
 
+    public async Task<IReadOnlyList<EquitySectorRow>> GetUniverseEquitiesWithSectorAsync(CancellationToken ct = default)
+    {
+        var sql = $"""
+            SELECT DISTINCT ON (e.id)
+              e.id AS InstrumentId,
+              e.symbol AS Symbol,
+              e.name AS Name,
+              s.id AS SectorInstrumentId,
+              s.symbol AS SectorSymbol,
+              s.name AS SectorName
+            FROM instruments e
+            JOIN universe_memberships u ON u.instrument_id = e.id AND u.valid_to IS NULL
+            JOIN instruments s ON s.id = e.sector_instrument_id AND s.kind = 'sector_index'
+            WHERE e.kind = 'equity'
+              AND e.is_active
+              AND e.sector_instrument_id IS NOT NULL
+              AND u.universe IN ({UniverseCodes.SqlEquityScanIn})
+            ORDER BY e.id, e.symbol
+            """;
+        using var conn = _db.CreateConnection();
+        var rows = await conn.QueryAsync<EquitySectorRow>(new CommandDefinition(sql, cancellationToken: ct));
+        return rows.ToList();
+    }
+
     public async Task<IReadOnlyList<Guid>> GetSectorInstrumentIdsAsync(CancellationToken ct = default)
     {
         const string sql = """

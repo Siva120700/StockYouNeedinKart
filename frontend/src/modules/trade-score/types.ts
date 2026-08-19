@@ -1,4 +1,5 @@
 import type { SectorRelativeStrength } from "../../utils/sectorRelativeStrength.tsx";
+import type { SectorRotationOverlay } from "../../utils/sectorRotation.tsx";
 
 export type TradeConfidenceScore = {
   id: string;
@@ -27,6 +28,7 @@ export type TradeConfidenceScore = {
   breakoutAdx?: number | null;
   breakoutRsi?: number | null;
   sectorRs?: SectorRelativeStrength | null;
+  sectorRotation?: SectorRotationOverlay | null;
 };
 
 export type TradeConfidenceRun = {

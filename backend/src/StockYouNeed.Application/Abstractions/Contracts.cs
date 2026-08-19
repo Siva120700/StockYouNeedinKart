@@ -117,6 +117,7 @@ public interface IInstrumentRepository
     Task SeedSectorIndexIfMissingAsync(string symbol, string name, CancellationToken ct = default);
     Task LinkEquityToSectorAsync(string equitySymbol, string sectorSymbol, CancellationToken ct = default);
     Task<IReadOnlyList<Instrument>> GetSectorIndexesAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<EquitySectorRow>> GetUniverseEquitiesWithSectorAsync(CancellationToken ct = default);
     Task<IReadOnlyList<Guid>> GetSectorInstrumentIdsAsync(CancellationToken ct = default);
     Task<Guid?> GetSectorIdForInstrumentAsync(Guid instrumentId, CancellationToken ct = default);
     Task<IReadOnlyList<AngelTokenRow>> GetActiveTokensForSectorsAsync(CancellationToken ct = default);
@@ -137,6 +138,8 @@ public interface IMarketDataRepository
     Task<IReadOnlyList<SectorScopeQuoteRow>> GetSectorScopeQuotesAsync(CancellationToken ct = default);
     Task<IReadOnlyList<MarketBarRow>> GetBarsAsync(Guid? instrumentId, int limitDays, CancellationToken ct = default);
     Task<IReadOnlyList<MarketBarRow>> GetBarsForInstrumentAsync(Guid instrumentId, int limitDays, CancellationToken ct = default);
+    Task<IReadOnlyList<MarketBarRow>> GetDailyBarsForInstrumentsAsync(
+        IReadOnlyList<Guid> instrumentIds, int limitDaysPerInstrument, CancellationToken ct = default);
     Task<IReadOnlyList<MarketIntradayBarRow>> GetIntradayBarsForInstrumentAsync(Guid instrumentId, string interval, int limitBars, CancellationToken ct = default);
     Task<IReadOnlyList<MarketIntradayBarRow>> GetIntradayBarsForUniverseAsync(string interval, int limitBarsPerInstrument, CancellationToken ct = default);
     Task<int> CountIntradayBarsAsync(Guid instrumentId, string interval, CancellationToken ct = default);

@@ -16,6 +16,7 @@ import type {
 } from "./types";
 import { gql } from "./client";
 import { SECTOR_RS_GQL } from "../utils/sectorRelativeStrength.tsx";
+import { SECTOR_ROTATION_GQL } from "../utils/sectorRotation.tsx";
 
 const BACKTEST_NOTE_FIELDS = `
   id instrumentId appSymbol instrumentName strategy side signalDate
@@ -65,6 +66,7 @@ export const DataFactory = {
           id analysisRunId instrumentId appSymbol instrumentName side
           entryPrice initialStopLoss targetT1 targetT2 targetT3 volumeOk sectorConfirmed freshCross
           ${SECTOR_RS_GQL}
+          ${SECTOR_ROTATION_GQL}
         }
       }`,
       { runId: runId ?? null },
